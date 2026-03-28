@@ -4,7 +4,14 @@ interface ApiResponse {
   success: boolean;
   message: string;
   data?: any;
-  pagination?: { page: number; limit: number; total: number; pages: number };
+  pagination?: {
+    page: number;
+    limit: number;
+    total: number;
+    pages: number;
+    hasNextPage: boolean;
+    hasPrevPage: boolean;
+  };
 }
 
 export const sendSuccess = (

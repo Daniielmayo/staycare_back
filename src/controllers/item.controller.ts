@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { ItemService } from "../services/item.service";
 import { sendSuccess, sendError } from "../utils/response";
+import { parsePagination, paginationMeta } from "../utils/paginate";
 
 /**
  * @swagger
@@ -56,21 +57,44 @@ export const createItem = async (req: Request, res: Response) => {
  *       - cookieAuth: []
  *     parameters:
  *       - in: query
- *         name: active
+ *         name: is_active
  *         schema: { type: boolean }
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 25 }
  *     responses:
  *       200:
  *         description: Lista de ítems
  */
 export const getAllItems = async (req: Request, res: Response) => {
   try {
-    const active = req.query.active === undefined ? undefined : req.query.active === "true";
-    const items = await ItemService.getAllItems(active);
-    return sendSuccess(res, 200, "Items retrieved", items);
+    const is_active = req.query.is_active === undefined ? undefined : req.query.is_active === "true";
+    const { page, limit, skip } = parsePagination(req);
+    
+    const { items, total } = await ItemService.getAllItems(is_active, limit, skip);
+    
+    // Map items to ensure is_active is boolean
+    const mappedItems = items.map((item) => ({
+      ...item,
+      is_active: !!item.is_active,
+    }));
+
+    return sendSuccess(
+      res,
+      200,
+      "Items retrieved",
+      mappedItems,
+      paginationMeta(total, page, limit)
+    );
   } catch (error) {
+    console.error("getAllItems error:", error);
     return sendError(res, 400, "Failed to fetch items");
   }
 };
+
 
 /**
  * @swagger

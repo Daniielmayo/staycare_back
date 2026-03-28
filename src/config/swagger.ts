@@ -1,4 +1,5 @@
 import swaggerJsdoc from "swagger-jsdoc";
+import path from "path";
 
 const options: swaggerJsdoc.Options = {
   definition: {
@@ -16,8 +17,8 @@ const options: swaggerJsdoc.Options = {
     },
     servers: [
       {
-        url: "http://localhost:5000",
-        description: "Docker / Desarrollo (PORT 5000)",
+        url: "http://localhost:5001",
+        description: "Docker / Desarrollo (PORT 5001)",
       },
     ],
     components: {
@@ -121,7 +122,12 @@ const options: swaggerJsdoc.Options = {
     },
     security: [],
   },
-  apis: ["./src/routes/*.ts", "./src/controllers/*.ts", "./src/validation/*.ts"],
+  apis: [
+    path.join(__dirname, "../routes/*.{ts,js}"),
+    path.join(__dirname, "../controllers/*.{ts,js}"),
+    path.join(__dirname, "../validation/*.{ts,js}"),
+  ],
 };
 
 export const swaggerSpec = swaggerJsdoc(options);
+

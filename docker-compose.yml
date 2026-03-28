@@ -24,22 +24,19 @@ services:
     build: .
     container_name: staycare_backend
     restart: always
+    env_file: .env           # Importar todas las variables del .env local
     depends_on:
       mysql:
         condition: service_healthy
-    environment:
-      - PORT=5001
-      - NODE_ENV=development
+    environment:             # Sobrescribir las de DB para que el contenedor use el host interno
       - DB_HOST=mysql
       - DB_PORT=3306
       - DB_USER=staycare_dev
       - DB_PASSWORD=123456
       - DB_NAME=staycare
-      - JWT_ACCESS_SECRET=change-me-access-secret
-      - JWT_REFRESH_SECRET=change-me-refresh-secret
-      - CLIENT_URL=http://localhost:5173
     ports:
       - "5001:5001"
+
 
 volumes:
   mysql_data:

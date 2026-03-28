@@ -327,12 +327,12 @@ CREATE TABLE IF NOT EXISTS `staycare`.`items` (
   `item_code` VARCHAR(20) NOT NULL,
   `name` VARCHAR(200) NOT NULL,
   `base_price` DECIMAL(10,2) NOT NULL DEFAULT '0.00' COMMENT 'Precio de referencia. El pedido puede usar un precio distinto',
-  `active` TINYINT(1) NOT NULL DEFAULT '1',
+  `is_active` TINYINT(1) NOT NULL DEFAULT '1',
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE INDEX `uq_items_code` (`item_code` ASC) VISIBLE,
-  INDEX `idx_items_active` (`active` ASC) VISIBLE)
+  INDEX `idx_items_is_active` (`is_active` ASC) VISIBLE)
 ENGINE = InnoDB
 AUTO_INCREMENT = 12
 DEFAULT CHARACTER SET = utf8mb4
@@ -547,11 +547,12 @@ ON DUPLICATE KEY UPDATE name=name;
 -- Seed Data: Users (Password: password123)
 -- -----------------------------------------------------
 INSERT INTO `staycare`.`users` (`id`, `name`, `email`, `password_hash`, `role_id`) VALUES
-(1, 'System Admin', 'admin@staycare.com', '$2a$10$6pZ070VbU4Ywz0fM3y3Eoe7m2uX7.G8R3J/zY70l7y8z.U7R6P.u6', 1),
-(2, 'Plant Staff', 'staff@staycare.com', '$2a$10$6pZ070VbU4Ywz0fM3y3Eoe7m2uX7.G8R3J/zY70l7y8z.U7R6P.u6', 2),
-(3, 'Main Driver', 'driver@staycare.com', '$2a$10$6pZ070VbU4Ywz0fM3y3Eoe7m2uX7.G8R3J/zY70l7y8z.U7R6P.u6', 3),
-(4, 'Test Client', 'client@staycare.com', '$2a$10$6pZ070VbU4Ywz0fM3y3Eoe7m2uX7.G8R3J/zY70l7y8z.U7R6P.u6', 4)
+(1, 'System Admin', 'admin@staycare.com', '$2b$10$ASu3vm3RtjKb1iTyms64hOdeTET8BT5/OMwgjOyZVZxGo.1WJh94m', 1),
+(2, 'Plant Staff', 'staff@staycare.com', '$2b$10$ASu3vm3RtjKb1iTyms64hOdeTET8BT5/OMwgjOyZVZxGo.1WJh94m', 2),
+(3, 'Main Driver', 'driver@staycare.com', '$2b$10$ASu3vm3RtjKb1iTyms64hOdeTET8BT5/OMwgjOyZVZxGo.1WJh94m', 3),
+(4, 'Test Client', 'client@staycare.com', '$2b$10$ASu3vm3RtjKb1iTyms64hOdeTET8BT5/OMwgjOyZVZxGo.1WJh94m', 4)
 ON DUPLICATE KEY UPDATE email=email;
+
 
 -- -----------------------------------------------------
 -- Seed Data: Client Profile (Required for client user)

@@ -6,7 +6,7 @@ export interface IItemRow extends RowDataPacket {
   item_code: string;
   name: string;
   base_price: number;
-  active: boolean;
+  is_active: boolean;
   created_at: Date;
   updated_at: Date;
 }
@@ -18,19 +18,37 @@ export interface ItemInsertInput {
 }
 
 export class ItemRepository {
-  static async findAll(active?: boolean): Promise<IItemRow[]> {
+  static async findAll(is_active?: boolean, limit?: number, offset?: number): Promise<IItemRow[]> {
     let query = "SELECT * FROM items";
     const params: any[] = [];
 
-    if (active !== undefined) {
-      query += " WHERE active = ?";
-      params.push(active ? 1 : 0);
+    if (is_active !== undefined) {
+      query += " WHERE is_active = ?";
+      params.push(is_active ? 1 : 0);
     }
 
     query += " ORDER BY item_code ASC";
 
+    if (limit !== undefined && offset !== undefined) {
+      query += " LIMIT ? OFFSET ?";
+      params.push(limit, offset);
+    }
+
     const [rows] = await pool.execute<IItemRow[]>(query, params);
     return rows;
+  }
+
+  static async count(is_active?: boolean): Promise<number> {
+    let query = "SELECT COUNT(*) as total FROM items";
+    const params: any[] = [];
+
+    if (is_active !== undefined) {
+      query += " WHERE is_active = ?";
+      params.push(is_active ? 1 : 0);
+    }
+
+    const [rows] = await pool.execute<RowDataPacket[]>(query, params);
+    return (rows[0] as { total: number }).total;
   }
 
   static async findById(id: number | string): Promise<IItemRow | null> {
@@ -51,7 +69,10 @@ export class ItemRepository {
     return result.insertId;
   }
 
-  static async update(id: number | string, data: Partial<ItemInsertInput> & { active?: boolean }): Promise<void> {
+  static async update(
+    id: number | string,
+    data: Partial<ItemInsertInput> & { is_active?: boolean },
+  ): Promise<void> {
     const fields = Object.keys(data);
     if (fields.length === 0) return;
 
@@ -65,3 +86,4 @@ export class ItemRepository {
     await pool.execute("DELETE FROM items WHERE id = ?", [id]);
   }
 }
+

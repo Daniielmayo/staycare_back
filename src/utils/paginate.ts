@@ -13,6 +13,8 @@ export interface PaginatedResult<T> {
     limit: number;
     total: number;
     pages: number;
+    hasNextPage: boolean;
+    hasPrevPage: boolean;
   };
 }
 
@@ -23,5 +25,13 @@ export function parsePagination(req: Request, defaultLimit = 25): PaginationPara
 }
 
 export function paginationMeta(total: number, page: number, limit: number) {
-  return { page, limit, total, pages: Math.ceil(total / limit) };
+  const pages = Math.ceil(total / limit);
+  return {
+    page,
+    limit,
+    total,
+    pages,
+    hasNextPage: page < pages,
+    hasPrevPage: page > 1,
+  };
 }

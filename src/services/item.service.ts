@@ -1,8 +1,10 @@
 import { ItemRepository, type ItemInsertInput } from "../repositories/item.repository";
 
 export class ItemService {
-  static async getAllItems(active?: boolean) {
-    return await ItemRepository.findAll(active);
+  static async getAllItems(is_active?: boolean, limit?: number, offset?: number) {
+    const items = await ItemRepository.findAll(is_active, limit, offset);
+    const total = await ItemRepository.count(is_active);
+    return { items, total };
   }
 
   static async getItemById(id: number | string) {
@@ -18,10 +20,11 @@ export class ItemService {
     return await ItemRepository.findById(id);
   }
 
-  static async updateItem(id: number | string, data: Partial<ItemInsertInput> & { active?: boolean }) {
+  static async updateItem(id: number | string, data: Partial<ItemInsertInput> & { is_active?: boolean }) {
     await ItemRepository.update(id, data);
     return await ItemRepository.findById(id);
   }
+
 
   static async deleteItem(id: number | string) {
     return await ItemRepository.delete(id);

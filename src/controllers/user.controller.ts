@@ -1,126 +1,139 @@
 import type { Request, Response } from "express";
-import bcrypt from "bcryptjs";
-import User from "../models/User";
+import { UserService } from "../services/user.service";
 import { sendSuccess, sendError } from "../utils/response";
 import { parsePagination, paginationMeta } from "../utils/paginate";
+import { AppError } from "../utils/AppError";
 
-const SALT_ROUNDS = 10;
+function stripUserSecrets<T extends { password_hash?: string; refresh_token?: string | null }>(u: T) {
+  const { password_hash, refresh_token, ...rest } = u;
+  return rest;
+}
 
-export const createUser = async (req: Request, res: Response) => {
-  try {
-    const { password, ...rest } = req.body;
-    
-    if (!password) {
-      return sendError(res, 400, "Password is required");
-    }
-    
-    const existing = await User.findOne({ email: rest.email });
-    if (existing) {
-      return sendError(res, 409, "Email already in use");
-    }
+/**
+ * @swagger
+ * tags:
+ *   name: Users
+ *   description: |
+ *     Gestión de usuarios (`users`). La gestión de sedes se ha movido a `/api/properties`.
+ */
 
-    const password_hash = await bcrypt.hash(password, SALT_ROUNDS);
-
-    const user = await User.create({ ...rest, password_hash });
-
-    const { password_hash: _, refresh_token, ...safeUser } = user.toObject();
-    return sendSuccess(res, 201, "User created", safeUser);
-  } catch (error: unknown) {
-    const code = (error as { code?: number })?.code;
-    if (code === 11000) {
-      return sendError(res, 409, "Email or phone already in use");
-    }
-    
-    // En desarrollo, mostrar el error real para debugging
-    const isDev = process.env.NODE_ENV === "development";
-    const errorMessage = error instanceof Error ? error.message : "User creation failed";
-    
-    console.error("User creation error:", error);
-    
-    return sendError(
-      res,
-      400,
-      isDev ? errorMessage : "User creation failed"
-    );
-  }
-};
-
+/**
+ * @swagger
+ * /api/users:
+ *   get:
+ *     summary: Listar usuarios (paginado)
+ *     tags: [Users]
+ *     security:
+ *       - cookieAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 25 }
+ *       - in: query
+ *         name: role
+ *         schema: { type: string, enum: [admin, staff, driver, client] }
+ *       - in: query
+ *         name: is_active
+ *         schema: { type: boolean }
+ *     responses:
+ *       200:
+ *         description: Lista de usuarios
+ */
 export const getAllUsers = async (req: Request, res: Response) => {
   try {
     const { role, is_active } = req.query;
-    const filter: Record<string, any> = {};
-    if (role) filter.role = role;
+    const filter: { role?: string; is_active?: boolean } = {};
+    if (typeof role === "string" && role.length) filter.role = role;
     if (is_active !== undefined) filter.is_active = is_active === "true";
 
     const { page, limit, skip } = parsePagination(req);
-    const [users, total] = await Promise.all([
-      User.find(filter)
-        .select("-password_hash -refresh_token")
-        .populate("client")
-        .skip(skip)
-        .limit(limit),
-      User.countDocuments(filter),
-    ]);
+    const { users, total } = await UserService.listUsersFiltered(filter, limit, skip);
+    const safe = users.map((u) => stripUserSecrets(u));
 
-    return sendSuccess(res, 200, "Users retrieved", users, paginationMeta(total, page, limit));
+    return sendSuccess(res, 200, "Users retrieved", safe, paginationMeta(total, page, limit));
   } catch (error) {
+    console.error("getAllUsers:", error);
     return sendError(res, 400, "Failed to fetch users");
   }
 };
 
+/**
+ * @swagger
+ * /api/users/{id}:
+ *   get:
+ *     summary: Obtener usuario por id
+ *     tags: [Users]
+ *     security:
+ *       - cookieAuth: []
+ */
 export const getUserById = async (req: Request, res: Response) => {
   try {
-    const user = await User.findById(req.params.id)
-      .select("-password_hash -refresh_token")
-      .populate("client");
-
-    if (!user) {
-      return sendError(res, 404, "User not found");
+    const rawId = req.params.id;
+    if (typeof rawId !== "string") {
+      return sendError(res, 400, "Invalid user id");
     }
+    const { user, client_profile } = await UserService.getUserByIdWithClientProfileIfExists(rawId);
+    const safe = stripUserSecrets(user);
 
-    return sendSuccess(res, 200, "User retrieved", user);
-  } catch (error) {
+    return sendSuccess(res, 200, "User retrieved", { user: safe, client_profile });
+  } catch (error: unknown) {
+    if (error instanceof AppError) return sendError(res, error.statusCode, error.message);
+    console.error("getUserById:", error);
     return sendError(res, 400, "Failed to fetch user");
   }
 };
 
+/**
+ * @swagger
+ * /api/users/{id}:
+ *   put:
+ *     summary: Actualizar usuario (admin)
+ *     tags: [Users]
+ *     security:
+ *       - cookieAuth: []
+ */
 export const updateUser = async (req: Request, res: Response) => {
   try {
-    const { password, ...rest } = req.body;
-    const updateData: Record<string, any> = { ...rest, updated_at: new Date() };
-
-    if (password) {
-      updateData.password_hash = await bcrypt.hash(password, SALT_ROUNDS);
+    const rawId = req.params.id;
+    if (typeof rawId !== "string") {
+      return sendError(res, 400, "Invalid user id");
     }
 
-    const user = await User.findByIdAndUpdate(req.params.id, updateData, {
-      new: true,
-    }).select("-password_hash -refresh_token");
+    const { user, client_profile } = await UserService.updateUserByAdmin(rawId, req.body);
 
-    if (!user) {
-      return sendError(res, 404, "User not found");
-    }
-
-    return sendSuccess(res, 200, "User updated", user);
-  } catch (error) {
+    const safe = stripUserSecrets(user);
+    return sendSuccess(res, 200, "User updated", { user: safe, client_profile });
+  } catch (error: unknown) {
+    if (error instanceof AppError) return sendError(res, error.statusCode, error.message);
+    console.error("updateUser:", error);
     return sendError(res, 400, "User update failed");
   }
 };
 
+/**
+ * @swagger
+ * /api/users/{id}:
+ *   delete:
+ *     summary: Desactivar usuario
+ *     tags: [Users]
+ *     security:
+ *       - cookieAuth: []
+ */
 export const deactivateUser = async (req: Request, res: Response) => {
   try {
-    const user = await User.findByIdAndUpdate(
-      req.params.id,
-      { is_active: false, updated_at: new Date() },
-      { new: true },
-    ).select("-password_hash -refresh_token");
-
-    if (!user) {
-      return sendError(res, 404, "User not found");
+    const rawId = req.params.id;
+    if (typeof rawId !== "string") {
+      return sendError(res, 400, "Invalid user id");
     }
 
-    return sendSuccess(res, 200, "User deactivated", user);
-  } catch (error) {
+    const updated = await UserService.deactivateUser(rawId);
+    return sendSuccess(res, 200, "User deactivated", stripUserSecrets(updated));
+  } catch (error: unknown) {
+    if (error instanceof AppError) return sendError(res, error.statusCode, error.message);
+    console.error("deactivateUser:", error);
     return sendError(res, 400, "User deactivation failed");
   }
 };

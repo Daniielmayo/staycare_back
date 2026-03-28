@@ -1,6 +1,8 @@
 import { z } from "zod";
+import { OrderStatus } from "../types/orderStatus";
 
 const orderItemSchema = z.object({
+  item_id: z.number().int().optional(),
   item_code: z.string().min(1),
   name: z.string().min(1),
   quantity: z.number().int().positive(),
@@ -10,10 +12,8 @@ const orderItemSchema = z.object({
 
 export const createOrderSchema = z.object({
   body: z.object({
-    // For admin/staff, client must be provided.
-    // For clients, the controller will override this field from the authenticated user.
-    client: z.string().min(1).optional(),
-    property: z.string().optional(),
+    client_id: z.number().int().optional(), // For admin/staff
+    property_id: z.number().int().optional(),
     service_type: z.enum(["standard", "express"]),
     pickup_date: z.string().datetime({ offset: true }).or(z.string().min(1)),
     pickup_window: z.object({
@@ -23,6 +23,14 @@ export const createOrderSchema = z.object({
     estimated_bags: z.number().int().positive().optional(),
     special_notes: z.string().optional(),
     items: z.array(orderItemSchema).optional(),
+    pricing_snapshot: z
+      .object({
+        subtotal: z.number(),
+        vat_percentage: z.number(),
+        vat_amount: z.number(),
+        total: z.number(),
+      })
+      .optional(),
   }),
 });
 
@@ -61,66 +69,30 @@ export const updateOrderSchema = z.object({
   params: z.object({ id: z.string() }),
 });
 
-const validStatuses = [
-  "Pending",
-  "Assigned",
-  "Transit",
-  "Arrived",
-  "Washing",
-  "Drying",
-  "Ironing",
-  "QualityCheck",
-  "ReadyToDeliver",
-  "Collected",
-  "Delivered",
-  "Invoiced",
-  "Completed",
-] as const;
-
-export const updateStatusSchema = z.object({
+/**
+ * Schema unificado para PATCH /api/orders/:id/status
+ *
+ * Campos extra opcionales dependiendo del status:
+ *  - transit   → actual_bags (req), photos?, notes?
+ *  - arrived   → internal_notes?
+ *  - delivered → photos?, notes?
+ *  - (resto)   → solo note?
+ */
+export const advanceStatusSchema = z.object({
   body: z.object({
-    status: z.enum(validStatuses),
-  }),
-  params: z.object({ id: z.string() }),
-});
-
-export const pickupConfirmSchema = z.object({
-  body: z.object({
-    actual_bags: z.number().int().positive(),
+    status: z.nativeEnum(OrderStatus),
+    // Pickup (transit)
+    actual_bags: z.number().int().positive().optional(),
+    // Photos (transit / delivered)
     photos: z
-      .array(
-        z.object({
-          photo_url: z.string().url(),
-          type: z.enum(["before", "after"]),
-        }),
-      )
+      .array(z.object({ url: z.string().url() }))
       .optional(),
-    items: z.array(orderItemSchema).optional(),
+    // Notes generales / driver pickup
     notes: z.string().optional(),
-  }),
-  params: z.object({ id: z.string() }),
-});
-
-export const facilityReceiveSchema = z.object({
-  body: z.object({
-    items: z.array(orderItemSchema).optional(),
+    // Staff — recepción en facility
     internal_notes: z.string().optional(),
-  }),
-  params: z.object({ id: z.string() }),
-});
-
-export const deliveryConfirmSchema = z.object({
-  body: z.object({
-    photos: z
-      .array(
-        z.object({
-          photo_url: z.string().url(),
-          type: z.enum(["before", "after"]),
-        }),
-      )
-      .optional(),
-    confirmation_method: z.enum(["signature", "pin", "photo"]).optional(),
-    notes: z.string().optional(),
+    // Historia genérica
+    note: z.string().optional(),
   }),
   params: z.object({ id: z.string() }),
 });

@@ -1,0 +1,45 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: staycare_db
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: 123456
+      MYSQL_DATABASE: staycare
+      MYSQL_USER: staycare_dev
+      MYSQL_PASSWORD: 123456
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      # Initialize with existing schema
+      - ./docs/migration/staycare_mysql.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: .
+    container_name: staycare_backend
+    restart: always
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      - PORT=5001
+      - NODE_ENV=development
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_USER=staycare_dev
+      - DB_PASSWORD=123456
+      - DB_NAME=staycare
+      - JWT_ACCESS_SECRET=change-me-access-secret
+      - JWT_REFRESH_SECRET=change-me-refresh-secret
+      - CLIENT_URL=http://localhost:5173
+    ports:
+      - "5001:5001"
+
+volumes:
+  mysql_data:

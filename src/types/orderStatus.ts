@@ -1,0 +1,17 @@
+export enum OrderStatus {
+  PENDING = "pending",
+  ASSIGNED = "assigned",
+  TRANSIT = "transit",
+  ARRIVED = "arrived",
+  WASHING = "washing",
+  DRYING = "drying",
+  IRONING = "ironing",
+  QUALITY_CHECK = "quality_check",
+  READY_TO_DELIVERY = "ready_to_delivery",
+  COLLECTED = "collected",
+  DELIVERED = "delivered",
+  INVOICED = "invoiced",
+  COMPLETED = "completed",
+  CANCELLED = "cancelled",
+  RESCHEDULED = "rescheduled",
+}

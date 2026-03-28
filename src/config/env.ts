@@ -3,7 +3,10 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const required = [
-  "DATABASE_URL",
+  "DB_HOST",
+  "DB_USER",
+  "DB_PASSWORD",
+  "DB_NAME",
   "JWT_ACCESS_SECRET",
   "JWT_REFRESH_SECRET",
 ] as const;

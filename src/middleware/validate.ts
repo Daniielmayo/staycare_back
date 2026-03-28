@@ -5,11 +5,18 @@ export const validate =
   (schema: z.ZodType) =>
   (req: Request, res: Response, next: NextFunction) => {
     try {
-      schema.parse({
+      const parsed = schema.parse({
         body: req.body,
         query: req.query,
         params: req.params,
-      });
+      }) as {
+        body?: unknown;
+        query?: unknown;
+        params?: unknown;
+      };
+      if (parsed.body !== undefined) req.body = parsed.body as Request["body"];
+      if (parsed.query !== undefined) req.query = parsed.query as Request["query"];
+      if (parsed.params !== undefined) req.params = parsed.params as Request["params"];
 
       next();
     } catch (error) {

@@ -1,0 +1,33 @@
+import { Router } from "express";
+import {
+  getMachineStatus,
+  createMachine,
+  updateMachine,
+  deleteMachine,
+  assignMachine,
+  releaseMachine,
+  seedMachines,
+} from "../controllers/machine.controller";
+import { authenticate } from "../middleware/authenticate";
+import { authorize } from "../middleware/authorize";
+
+/**
+ * @swagger
+ * tags:
+ *   name: Machines
+ *   description: Endpoints para gestión de lavadoras, secadoras y estaciones de planchado
+ */
+
+const router = Router();
+
+router.use(authenticate);
+
+router.get("/", authorize("admin", "staff"), getMachineStatus);
+router.post("/", authorize("admin"), createMachine);
+router.put("/:id", authorize("admin"), updateMachine);
+router.delete("/:id", authorize("admin"), deleteMachine);
+router.post("/:id/assign", authorize("admin", "staff"), assignMachine);
+router.post("/:id/release", authorize("admin", "staff"), releaseMachine);
+router.post("/seed", authorize("admin", "staff"), seedMachines);
+
+export default router;

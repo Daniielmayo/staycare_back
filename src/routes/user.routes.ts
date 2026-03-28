@@ -1,28 +1,25 @@
 import { Router } from "express";
 import {
-  createUser,
   getAllUsers,
   getUserById,
   updateUser,
   deactivateUser,
 } from "../controllers/user.controller";
 import { validate } from "../middleware/validate";
-import { createUserSchema } from "../validation/user.validation";
+import { updateUserByAdminSchema } from "../validation/user.validation";
 import { authenticate } from "../middleware/authenticate";
 import { authorize } from "../middleware/authorize";
 
 const router = Router();
 
-router.post(
-  "/",
-  authenticate,
-  authorize("admin"),
-  validate(createUserSchema),
-  createUser,
-);
-router.get("/", authenticate, authorize("admin", "staff"), getAllUsers);
-router.get("/:id", authenticate, authorize("admin", "staff"), getUserById);
-router.put("/:id", authenticate, authorize("admin"), updateUser);
-router.delete("/:id", authenticate, authorize("admin"), deactivateUser);
+router.use(authenticate);
+
+// Admin/Staff only: list and get user details
+router.get("/", authorize("admin", "staff"), getAllUsers);
+router.get("/:id", authorize("admin", "staff"), getUserById);
+
+// Admin only: update/deactivate users
+router.put("/:id", authorize("admin"), validate(updateUserByAdminSchema), updateUser);
+router.delete("/:id", authorize("admin"), deactivateUser);
 
 export default router;

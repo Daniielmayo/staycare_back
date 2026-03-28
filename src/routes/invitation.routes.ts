@@ -15,6 +15,15 @@ import {
 
 const router = Router();
 
+/**
+ * @swagger
+ * tags:
+ *   name: Invitations
+ *   description: Invitaciones de alta de personal — admin, staff, driver
+ */
+
+// ─── Admin-protected ──────────────────────────────────────────────────────────
+
 router.post(
   "/",
   authenticate,
@@ -24,6 +33,8 @@ router.post(
 );
 
 router.get("/", authenticate, authorize("admin"), listInvitations);
+
+// ─── Public (no auth required) ────────────────────────────────────────────────
 
 router.get("/:token/validate", validateInvitation);
 

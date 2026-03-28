@@ -88,13 +88,24 @@ Request
   → sendSuccess / sendError
   → errorHandler (captura cualquier throw no controlado)
 
-## Base de datos — 17 tablas MySQL
+## Modelo de identidad y clientes (MySQL)
+
+- **`roles`**: catálogo fijo (`admin`, `staff`, `driver`, `client`). `users.role_id` → `roles.id`.
+- **`users`**: cuenta (nombre, email, contraseña, teléfono, idioma, etc.).  
+  **Crear un “cliente”** es crear un **`user` con rol `client`**.
+- **`client_profiles`**: datos B2B **solo si el usuario es `client`** (1:1 con `users.id` vía `user_id`).  
+  Incluye `contact_person`, `vat_number`, `billing_address`, `credits_terms_days`, `pricing_tier`, etc.
+- **`properties`**: sedes del cliente; `client_profile_id` → `client_profiles.id` (1:N).
+
+No existe tabla `clients` separada: el endpoint `/api/clients` opera sobre **`client_profiles` + `users` (rol client) + `properties`**.
+
+Registro público (`POST /api/auth/register`) y **alta por admin/staff de cualquier rol** (`POST /api/users`, incl. `role: client` con `client_profile` y `properties` opcional) persisten en las **mismas tablas**; la parte “empresa” va en `client_profiles`. No hay `POST /api/clients` para esa alta (solo listado/edición de perfiles y `POST /api/clients/self` para completar perfil del usuario actual).
+
+## Base de datos — resto de tablas (legado / migración)
 
 Tabla                 | Origen (colección Mongo original)
 ----------------------|------------------------------------------
-users                 | User
-clients               | Clients
-properties            | Clients.properties[] (subdoc embebido)
+users / client_profiles / properties | Sustituyen el antiguo modelo Clients embebido
 items                 | Items
 orders                | Orders
 order_items           | Orders.items[] (snapshot por valor, sin FK a items)

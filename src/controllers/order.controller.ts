@@ -1,510 +1,531 @@
 import { Request, Response } from "express";
-import Order from "../models/Orders";
-import Invoice from "../models/Invoices";
-import User from "../models/User";
-import Client from "../models/Clients";
+import { OrderService } from "../services/order.service";
+import { OrderStatus } from "../types/orderStatus";
 import { sendSuccess, sendError } from "../utils/response";
 import { parsePagination, paginationMeta } from "../utils/paginate";
-import { autoAssignRoute, reassignOrderToDriver } from "../utils/autoAssignRoute";
-import { sendOrderStatusEmail } from "../utils/mail";
 
-const NOTIFY_STATUSES = new Set([
-  "Assigned", "Transit", "Arrived", "ReadyToDeliver", "Delivered", "Completed",
-]);
+/**
+ * @swagger
+ * tags:
+ *   name: Orders
+ *   description: Gestión de pedidos de lavandería — ciclo completo de vida
+ */
 
-async function notifyClientOfStatus(orderId: string, newStatus: string): Promise<void> {
-  if (!NOTIFY_STATUSES.has(newStatus)) return;
-  try {
-    const order = await Order.findById(orderId).select("order_number client");
-    if (!order) return;
-    const client = await Client.findById(order.client).select("email contact_person");
-    if (!client?.email) return;
-    await sendOrderStatusEmail(client.email, order.order_number, newStatus, client.contact_person);
-  } catch { /* best-effort */ }
-}
-
-const generateOrderNumber = (): string => {
-  const date = new Date();
-  const y = date.getFullYear().toString().slice(-2);
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  const d = String(date.getDate()).padStart(2, "0");
-  const rand = Math.floor(1000 + Math.random() * 9000);
-  return `ORD-${y}${m}${d}-${rand}`;
-};
-
+/**
+ * @swagger
+ * /api/orders:
+ *   post:
+ *     summary: Crear un pedido
+ *     description: Disponible para **admin**, **staff** y **client**. Los clientes tienen su `client_id` resuelto automáticamente desde su perfil vinculado.
+ *     tags: [Orders]
+ *     security:
+ *       - cookieAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [pickup_date, pickup_window, service_type]
+ *             properties:
+ *               client_id:
+ *                 type: integer
+ *                 description: Requerido si el rol es admin o staff
+ *               property_id:
+ *                 type: integer
+ *                 nullable: true
+ *               service_type:
+ *                 type: string
+ *                 enum: [standard, express]
+ *               pickup_date:
+ *                 type: string
+ *                 format: date
+ *                 example: "2026-04-01"
+ *               pickup_window:
+ *                 type: object
+ *                 required: [start_time, end_time]
+ *                 properties:
+ *                   start_time: { type: string, format: date-time }
+ *                   end_time:   { type: string, format: date-time }
+ *               estimated_bags:
+ *                 type: integer
+ *                 nullable: true
+ *               special_notes:
+ *                 type: string
+ *                 nullable: true
+ *               items:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     item_id:     { type: integer, nullable: true }
+ *                     item_code:   { type: string }
+ *                     name:        { type: string }
+ *                     quantity:    { type: integer }
+ *                     unit_price:  { type: number }
+ *                     total_price: { type: number }
+ *               pricing_snapshot:
+ *                 type: object
+ *                 properties:
+ *                   subtotal:       { type: number }
+ *                   vat_percentage: { type: number }
+ *                   vat_amount:     { type: number }
+ *                   total:          { type: number }
+ *     responses:
+ *       201:
+ *         description: Pedido creado con estado PENDING
+ *       400:
+ *         description: Error de validación o creación
+ *       401:
+ *         description: No autenticado
+ *       403:
+ *         description: Rol sin permiso
+ */
 export const createOrder = async (req: Request, res: Response) => {
   try {
-    const orderData: Record<string, any> = {
-      ...req.body,
-      order_number: generateOrderNumber(),
-      status: "Pending",
-      status_history: [
-        {
-          status: "Pending",
-          changed_by: req.user!.userId,
-          timestamp: new Date(),
-        },
-      ],
-    };
-
-    if (!orderData.pricing_snapshot) {
-      orderData.pricing_snapshot = {
-        subtotal: 0,
-        vat_percentage: 18,
-        vat_amount: 0,
-        total: 0,
-      };
-    }
-
-    // Order.client must be the Clients document id (ref "Clients"), not the User id.
-    if (req.user!.role === "client") {
-      const user = await User.findById(req.user!.userId).select("client");
-      if (!user?.client) {
-        return sendError(res, 400, "Your account has no linked client. Complete company setup first.");
-      }
-      orderData.client = user.client;
-    } else {
-      // admin / staff must supply a client id
-      if (!orderData.client) {
-        return sendError(res, 400, "client field is required when an admin creates an order");
-      }
-    }
-
-    // If a property is specified, verify it belongs to the resolved client
-    if (orderData.property && orderData.client) {
-      const clientDoc = await Client.findById(orderData.client);
-      if (!clientDoc) {
-        return sendError(res, 404, "Client not found");
-      }
-      const wantedId = String(orderData.property).trim();
-      const propertyBelongs = (clientDoc.properties as any[]).some(
-        (p) => p._id && p._id.toString() === wantedId,
-      );
-      if (!propertyBelongs) {
-        return sendError(
-          res,
-          400,
-          "The specified property does not belong to this client. Use properties[]. _id from GET /api/clients/:id (same id as order client). Or omit property.",
-        );
-      }
-    }
-
-    const order = await Order.create(orderData);
-
-    // Auto-assign the new order to a driver route (best-effort — never fails the request)
-    try {
-      await autoAssignRoute(order);
-    } catch (_) {}
-
-    // Re-fetch so the response reflects any status / deliver_id updates from assignment
-    const updatedOrder = await Order.findById(order._id)
-      .populate("deliver_id", "name email phone");
-
-    return sendSuccess(res, 201, "Order created", updatedOrder ?? order);
-  } catch (error) {
-    return sendError(res, 400, "Order creation failed");
-  }
-};
-
-export const getAllOrders = async (req: Request, res: Response) => {
-  try {
-    const { status, client, service_type, from, to } = req.query;
-    const filter: Record<string, any> = {};
-
-    if (status) filter.status = status;
-    if (service_type) filter.service_type = service_type;
-
-    if (req.user!.role === "client") {
-      const user = await User.findById(req.user!.userId).select("client");
-      if (user?.client) filter.client = user.client;
-      else filter.client = null; // no linked client -> no orders
-    } else if (client) {
-      filter.client = client;
-    }
-
-    if (req.user!.role === "driver") {
-      filter.deliver_id = req.user!.userId;
-    }
-
-    if (from || to) {
-      filter.created_at = {};
-      if (from) filter.created_at.$gte = new Date(from as string);
-      if (to) filter.created_at.$lte = new Date(to as string);
-    }
-
-    const { page, limit, skip } = parsePagination(req);
-    const [orders, total] = await Promise.all([
-      Order.find(filter)
-        .populate("client", "company_name contact_person email properties billing_address")
-        .populate("deliver_id", "name email")
-        .sort({ created_at: -1 })
-        .skip(skip)
-        .limit(limit),
-      Order.countDocuments(filter),
-    ]);
-
-    return sendSuccess(res, 200, "Orders retrieved", orders, paginationMeta(total, page, limit));
-  } catch (error) {
-    return sendError(res, 400, "Failed to fetch orders");
-  }
-};
-
-export const getOrderById = async (req: Request, res: Response) => {
-  try {
-    const order = await Order.findById(req.params.id)
-      .populate("client")
-      .populate("deliver_id", "name email phone");
-
-    if (!order) {
-      return sendError(res, 404, "Order not found");
-    }
-
-    if (req.user!.role === "client") {
-      const user = await User.findById(req.user!.userId).select("client");
-      const orderClientId =
-        (order.client as any)?._id?.toString() ?? (order.client as any)?.toString?.();
-      const userClientId = user?.client?.toString?.();
-      if (!userClientId || orderClientId !== userClientId) {
-        return sendError(res, 403, "Forbidden");
-      }
-    }
-
-    return sendSuccess(res, 200, "Order retrieved", order);
-  } catch (error) {
-    return sendError(res, 400, "Failed to fetch order");
-  }
-};
-
-export const updateOrder = async (req: Request, res: Response) => {
-  try {
-    const order = await Order.findById(req.params.id);
-    if (!order) {
-      return sendError(res, 404, "Order not found");
-    }
-
-    if (
-      !["Pending", "Assigned"].includes(order.status) &&
-      req.user!.role !== "admin"
-    ) {
-      return sendError(res, 400, "Order can only be edited while Pending or Assigned");
-    }
-
-    const updated = await Order.findByIdAndUpdate(
-      req.params.id,
-      { ...req.body, updated_at: new Date() },
-      { new: true },
-    );
-
-    return sendSuccess(res, 200, "Order updated", updated);
-  } catch (error) {
-    return sendError(res, 400, "Order update failed");
-  }
-};
-
-export const updateOrderStatus = async (req: Request, res: Response) => {
-  try {
-    const { status } = req.body;
-    const order = await Order.findById(req.params.id);
-
-    if (!order) {
-      return sendError(res, 404, "Order not found");
-    }
-
-    order.status = status;
-    order.status_history.push({
-      status,
-      changed_by: req.user!.userId,
-      timestamp: new Date(),
-    });
-    order.updated_at = new Date();
-
-    await order.save();
-    notifyClientOfStatus(order._id.toString(), status);
-    return sendSuccess(res, 200, "Order status updated", order);
-  } catch (error) {
-    return sendError(res, 400, "Status update failed");
-  }
-};
-
-export const confirmPickup = async (req: Request, res: Response) => {
-  try {
-    const order = await Order.findById(req.params.id);
-    if (!order) {
-      return sendError(res, 404, "Order not found");
-    }
-
-    if (!["Pending", "Assigned"].includes(order.status)) {
-      return sendError(res, 400, "Order is not awaiting pickup");
-    }
-
-    order.actual_bags = req.body.actual_bags;
-
-    if (req.body.photos) {
-      for (const photo of req.body.photos) {
-        order.photos.push({ ...photo, uploaded_at: new Date() });
-      }
-    }
-
-    if (req.body.items) {
-      order.items = req.body.items;
-    }
-
-    if (req.body.notes) {
-      order.special_notes = [order.special_notes, req.body.notes]
-        .filter(Boolean)
-        .join(" | ");
-    }
-
-    order.deliver_id = req.user!.userId as any;
-    order.status = "Transit";
-    order.status_history.push({
-      status: "Transit",
-      changed_by: req.user!.userId,
-      timestamp: new Date(),
-    });
-    order.updated_at = new Date();
-
-    await order.save();
-    notifyClientOfStatus(order._id.toString(), "Transit");
-    return sendSuccess(res, 200, "Pickup confirmed", order);
-  } catch (error) {
-    return sendError(res, 400, "Pickup confirmation failed");
-  }
-};
-
-export const receiveAtFacility = async (req: Request, res: Response) => {
-  try {
-    const order = await Order.findById(req.params.id);
-    if (!order) {
-      return sendError(res, 404, "Order not found");
-    }
-
-    if (order.status !== "Transit") {
-      return sendError(res, 400, "Order is not in transit");
-    }
-
-    if (req.body.items) {
-      order.items = req.body.items;
-    }
-
-    if (req.body.internal_notes) {
-      order.special_notes = [order.special_notes, req.body.internal_notes]
-        .filter(Boolean)
-        .join(" | ");
-    }
-
-    order.status = "Arrived";
-    order.status_history.push({
-      status: "Arrived",
-      changed_by: req.user!.userId,
-      timestamp: new Date(),
-    });
-    order.updated_at = new Date();
-
-    await order.save();
-    return sendSuccess(res, 200, "Order received at facility", order);
-  } catch (error) {
-    return sendError(res, 400, "Facility reception failed");
-  }
-};
-
-export const confirmDelivery = async (req: Request, res: Response) => {
-  try {
-    const order = await Order.findById(req.params.id);
-    if (!order) {
-      return sendError(res, 404, "Order not found");
-    }
-
-    if (!["ReadyToDeliver", "Collected"].includes(order.status)) {
-      return sendError(res, 400, "Order is not ready for delivery");
-    }
-
-    if (req.body.photos) {
-      for (const photo of req.body.photos) {
-        order.photos.push({ ...photo, uploaded_at: new Date() });
-      }
-    }
-
-    order.status = "Delivered";
-    order.status_history.push({
-      status: "Delivered",
-      changed_by: req.user!.userId,
-      timestamp: new Date(),
-    });
-    order.updated_at = new Date();
-
-    await order.save();
-    notifyClientOfStatus(order._id.toString(), "Delivered");
-
-    // ── Auto-generate invoice ──────────────────────────────────
-    try {
-      const now = new Date();
-      const y = now.getFullYear().toString().slice(-2);
-      const m = String(now.getMonth() + 1).padStart(2, "0");
-      const rand = Math.floor(1000 + Math.random() * 9000);
-      const invoiceNumber = `INV-${y}${m}-${rand}`;
-
-      // Build line items from order items
-      const lineItems = (order.items ?? []).map((item) => ({
-        description: item.name,
-        quantity: item.quantity ?? 1,
-        unit_price: item.unit_price ?? 0,
-        total_price: item.total_price ?? 0,
-      }));
-
-      // If order has no items, create a single line from the bag count
-      if (lineItems.length === 0) {
-        lineItems.push({
-          description: `Laundry service – ${order.service_type} (${order.actual_bags ?? order.estimated_bags ?? 1} bags)`,
-          quantity: order.actual_bags ?? order.estimated_bags ?? 1,
-          unit_price:
-            order.pricing_snapshot?.subtotal
-              ? order.pricing_snapshot.subtotal / (order.actual_bags ?? order.estimated_bags ?? 1)
-              : 0,
-          total_price: order.pricing_snapshot?.subtotal ?? 0,
-        });
-      }
-
-      const dueDate = new Date(now);
-      dueDate.setDate(dueDate.getDate() + 14); // Net-14 payment terms
-
-      const invoice = await Invoice.create({
-        invoice_number: invoiceNumber,
-        client: order.client,
-        orders: [order._id] as any,
-        issue_date: now,
-        due_date: dueDate,
-        line_items: lineItems,
-        subtotal: order.pricing_snapshot?.subtotal ?? 0,
-        vat_percentage: order.pricing_snapshot?.vat_percentage ?? 18,
-        vat_amount: order.pricing_snapshot?.vat_amount ?? 0,
-        total: order.pricing_snapshot?.total ?? 0,
-        status: "pending",
-      });
-
-      // Move order to Invoiced
-      order.status = "Invoiced";
-      order.status_history.push({
-        status: "Invoiced",
-        changed_by: req.user!.userId,
-        timestamp: new Date(),
-      });
-      order.updated_at = new Date();
-      await order.save();
-
-      return sendSuccess(res, 200, "Delivery confirmed & invoice created", {
-        order,
-        invoice,
-      });
-    } catch (invoiceErr) {
-      // Invoice creation failed but delivery was already confirmed
-      // Return success for the delivery but include a warning
-      return sendSuccess(res, 200, "Delivery confirmed (invoice generation failed)", order);
-    }
-  } catch (error) {
-    return sendError(res, 400, "Delivery confirmation failed");
+    const userId = Number(req.user!.userId);
+    const order = await OrderService.createOrder(req.body, userId, req.user!.role);
+    return sendSuccess(res, 201, "Order created", order);
+  } catch (error: any) {
+    return sendError(res, 400, error.message || "Order creation failed");
   }
 };
 
 /**
- * Admin / staff only — move an order to a different driver.
- * Body: { driver_id: string }
+ * @swagger
+ * /api/orders:
+ *   get:
+ *     summary: Listar pedidos (paginado + filtros)
+ *     description: |
+ *       - **admin / staff**: ven todos los pedidos. Pueden filtrar por `client_id`.
+ *       - **driver**: ve solo los pedidos asignados a él.
+ *       - **client**: filtro automático por su perfil de cliente.
+ *     tags: [Orders]
+ *     security:
+ *       - cookieAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *           enum: [pending, assigned, transit, arrived, washing, drying, ironing, quality_check, ready_to_delivery, collected, delivered, invoiced, completed, cancelled, rescheduled]
+ *       - in: query
+ *         name: client_id
+ *         schema: { type: integer }
+ *       - in: query
+ *         name: service_type
+ *         schema: { type: string, enum: [standard, express] }
+ *       - in: query
+ *         name: from
+ *         schema: { type: string, format: date }
+ *       - in: query
+ *         name: to
+ *         schema: { type: string, format: date }
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 20 }
+ *     responses:
+ *       200:
+ *         description: Lista paginada de pedidos
+ *       401:
+ *         description: No autenticado
  */
-export const reassignOrder = async (req: Request, res: Response) => {
+export const getAllOrders = async (req: Request, res: Response) => {
   try {
-    const { driver_id } = req.body;
-    if (!driver_id) return sendError(res, 400, "driver_id is required");
+    const { status, client_id, service_type, from, to, pickup_from, pickup_to } = req.query;
+    const filter: any = { status, client_id, service_type, from, to, pickup_from, pickup_to };
 
-    const route = await reassignOrderToDriver(
-      req.params.id as string,
-      driver_id,
-      req.user!.userId,
-    );
+    // 1. Admin: Si busca pendientes de asignación, eliminamos restricción de fecha por defecto
+    if (req.user!.role === "admin" && status === OrderStatus.PENDING) {
+      delete filter.from;
+      delete filter.to;
+      delete filter.pickup_from;
+      delete filter.pickup_to;
+    }
 
-    const order = await Order.findById(req.params.id).populate("deliver_id", "name email phone");
-    return sendSuccess(res, 200, "Order reassigned", { order, route });
+    // 2. Driver: Ver todas sus órdenes activas (no entregadas/finalizadas)
+    if (req.user!.role === "driver") {
+      filter.driver_id = Number(req.user!.userId);
+      
+      // Si el driver no especifica un estado puntual, le mostramos todo lo "abierto"
+      if (!status) {
+        filter.status = [
+          OrderStatus.ASSIGNED,
+          OrderStatus.TRANSIT,
+          OrderStatus.ARRIVED,
+          OrderStatus.WASHING,
+          OrderStatus.DRYING,
+          OrderStatus.IRONING,
+          OrderStatus.QUALITY_CHECK,
+          OrderStatus.READY_TO_DELIVERY,
+          OrderStatus.COLLECTED,
+          OrderStatus.RESCHEDULED
+        ];
+        
+        // El driver debe ver todo lo abierto sin importar la fecha
+        delete filter.from;
+        delete filter.to;
+        delete filter.pickup_from;
+        delete filter.pickup_to;
+      }
+    }
+
+    const { page, limit, skip } = parsePagination(req);
+    const { orders, total } = await OrderService.getAllOrders(filter, limit, skip);
+
+    return sendSuccess(res, 200, "Orders retrieved", orders, paginationMeta(total, page, limit));
   } catch (error: any) {
-    return sendError(res, 400, error?.message ?? "Reassignment failed");
+    return sendError(res, 400, error.message || "Failed to fetch orders");
   }
 };
 
+/**
+ * @swagger
+ * /api/orders/{id}:
+ *   get:
+ *     summary: Obtener detalle de un pedido por ID
+ *     description: Incluye `items`, `status_history` y datos del cliente / driver / propiedad.
+ *     tags: [Orders]
+ *     security:
+ *       - cookieAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *     responses:
+ *       200:
+ *         description: Detalle del pedido
+ *       400:
+ *         description: ID inválido
+ *       401:
+ *         description: No autenticado
+ *       404:
+ *         description: Pedido no encontrado
+ */
+export const getOrderById = async (req: Request, res: Response) => {
+  try {
+    const orderId = Number(req.params.id);
+    if (isNaN(orderId)) return sendError(res, 400, "Invalid order ID");
+    const order = await OrderService.getOrderById(orderId);
+    return sendSuccess(res, 200, "Order retrieved", order);
+  } catch (error: any) {
+    return sendError(res, 400, "Failed to fetch order");
+  }
+};
+
+/**
+ * @swagger
+ * /api/orders/{id}:
+ *   put:
+ *     summary: Actualizar datos generales de un pedido (admin / staff)
+ *     tags: [Orders]
+ *     security:
+ *       - cookieAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               special_notes:  { type: string }
+ *               estimated_bags: { type: integer }
+ *               service_type:   { type: string, enum: [standard, express] }
+ *     responses:
+ *       200:
+ *         description: Pedido actualizado
+ *       400:
+ *         description: Error de actualización
+ *       401:
+ *         description: No autenticado
+ *       403:
+ *         description: No es admin o staff
+ */
+export const updateOrder = async (req: Request, res: Response) => {
+  try {
+    const userId = Number(req.user!.userId);
+    const order = await OrderService.updateOrder(Number(req.params.id), req.body, userId);
+    return sendSuccess(res, 200, "Order updated", order);
+  } catch (error: any) {
+    return sendError(res, 400, "Order update failed");
+  }
+};
+
+/**
+ * @swagger
+ * /api/orders/{id}/status:
+ *   patch:
+ *     summary: Avanzar el estado de un pedido
+ *     description: |
+ *       **Endpoint único** para todas las transiciones de estado. El servicio valida el rol
+ *       permitido para cada estado destino y ejecuta la lógica especializada correspondiente:
+ *
+ *       | Status destino | Roles permitidos | Campos extra requeridos |
+ *       |---|---|---|
+ *       | `transit` | driver, admin | `actual_bags` (req), `photos`?, `notes`? |
+ *       | `arrived` | staff, admin | `internal_notes`? |
+ *       | `washing` `drying` `ironing` `quality_check` `ready_to_delivery` | staff, admin | `note`? |
+ *       | `collected` | driver, admin | — |
+ *       | `delivered` | driver, admin | `photos`?, `notes`? |
+ *       | `pending` `cancelled` `completed` `invoiced` `assigned` | admin, staff | `note`? |
+ *     tags: [Orders]
+ *     security:
+ *       - cookieAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [status]
+ *             properties:
+ *               status:
+ *                 type: string
+ *                 enum: [pending, assigned, transit, arrived, washing, drying, ironing, quality_check, ready_to_delivery, collected, delivered, invoiced, completed, cancelled]
+ *               actual_bags:
+ *                 type: integer
+ *                 description: Requerido cuando status = transit
+ *               photos:
+ *                 type: array
+ *                 description: Para transit (before) o delivered (after)
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     url: { type: string, format: uri }
+ *               notes:
+ *                 type: string
+ *                 description: Nota de recogida o entrega
+ *               internal_notes:
+ *                 type: string
+ *                 description: Nota interna de staff al recibir en facility
+ *               note:
+ *                 type: string
+ *                 description: Nota genérica registrada en el historial de estado
+ *     responses:
+ *       200:
+ *         description: Estado actualizado correctamente
+ *       400:
+ *         description: Rol no autorizado para ese estado o datos inválidos
+ *       401:
+ *         description: No autenticado
+ *       403:
+ *         description: Forbidden
+ */
+export const advanceOrderStatus = async (req: Request, res: Response) => {
+  try {
+    const orderId = Number(req.params.id);
+    if (isNaN(orderId)) return sendError(res, 400, "Invalid order ID");
+
+    const { status, ...payload } = req.body;
+    const userId = Number(req.user!.userId);
+
+    const order = await OrderService.advanceStatus(orderId, status, payload, userId, req.user!.role);
+    return sendSuccess(res, 200, "Order status updated", order);
+  } catch (error: any) {
+    return sendError(res, 400, error.message || "Status update failed");
+  }
+};
+
+/**
+ * @swagger
+ * /api/orders/{id}:
+ *   delete:
+ *     summary: Eliminar un pedido (solo admin)
+ *     tags: [Orders]
+ *     security:
+ *       - cookieAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *     responses:
+ *       200:
+ *         description: Pedido eliminado
+ *       400:
+ *         description: Error al eliminar
+ *       401:
+ *         description: No autenticado
+ *       403:
+ *         description: No es admin
+ */
 export const deleteOrder = async (req: Request, res: Response) => {
   try {
-    const order = await Order.findById(req.params.id);
-    if (!order) {
-      return sendError(res, 404, "Order not found");
-    }
-
-    if (order.status !== "Pending") {
-      return sendError(res, 400, "Only pending orders can be deleted");
-    }
-
-    await order.deleteOne();
+    await OrderService.deleteOrder(Number(req.params.id));
     return sendSuccess(res, 200, "Order deleted");
-  } catch (error) {
+  } catch (error: any) {
     return sendError(res, 400, "Order deletion failed");
   }
 };
 
+/**
+ * @swagger
+ * /api/orders/{id}/reschedule:
+ *   patch:
+ *     summary: Reprogramar fecha de recogida
+ *     description: |
+ *       Disponible para **admin**, **staff** y el propio **client**.
+ *       Si el pedido estaba `assigned`, vuelve a `pending` y libera al conductor.
+ *     tags: [Orders]
+ *     security:
+ *       - cookieAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [pickup_date, pickup_window]
+ *             properties:
+ *               pickup_date:
+ *                 type: string
+ *                 format: date
+ *               pickup_window:
+ *                 type: object
+ *                 required: [start_time, end_time]
+ *                 properties:
+ *                   start_time: { type: string, format: date-time }
+ *                   end_time:   { type: string, format: date-time }
+ *     responses:
+ *       200:
+ *         description: Pedido reprogramado
+ *       400:
+ *         description: Error al reprogramar
+ *       401:
+ *         description: No autenticado
+ */
 export const rescheduleOrder = async (req: Request, res: Response) => {
   try {
-    const order = await Order.findById(req.params.id);
-    if (!order) {
-      return sendError(res, 404, "Order not found");
-    }
+    const userId = Number(req.user!.userId);
+    const order = await OrderService.rescheduleOrder(Number(req.params.id), req.body, userId);
+    return sendSuccess(res, 200, "Order rescheduled", order);
+  } catch (error: any) {
+    return sendError(res, 400, "Reschedule failed");
+  }
+};
 
-    if (!['Pending', 'Assigned'].includes(order.status)) {
-      return sendError(res, 400, "Only Pending or Assigned orders can be rescheduled");
-    }
+/**
+ * @swagger
+ * /api/orders/{id}/reassign:
+ *   patch:
+ *     summary: Reasignar pedido a otro conductor (solo admin)
+ *     description: |
+ *       Elimina la asignación anterior de ruta, busca o crea una ruta planificada para el
+ *       nuevo conductor en la misma fecha y asigna el pedido. Estado → `assigned`.
+ *     tags: [Orders]
+ *     security:
+ *       - cookieAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [driver_id]
+ *             properties:
+ *               driver_id:
+ *                 type: integer
+ *                 description: ID del usuario conductor destino
+ *     responses:
+ *       200:
+ *         description: Pedido reasignado al nuevo conductor
+ *       400:
+ *         description: Driver no encontrado o error
+ *       401:
+ *         description: No autenticado
+ *       403:
+ *         description: No es admin
+ */
+export const reassignOrder = async (req: Request, res: Response) => {
+  try {
+    const { driver_id } = req.body;
+    const userId = Number(req.user!.userId);
+    const order = await OrderService.reassignOrder(
+      Number(req.params.id),
+      Number(driver_id),
+      userId,
+      req.user!.role
+    );
+    return sendSuccess(res, 200, "Order reassigned", order);
+  } catch (error: any) {
+    return sendError(res, 400, error.message || "Reassignment failed");
+  }
+};
 
-    // Clients can only reschedule their own orders
-    if (req.user!.role === 'client') {
-      const user = await User.findById(req.user!.userId).select('client');
-      const orderClientId =
-        (order.client as any)?._id?.toString() ?? (order.client as any)?.toString?.();
-      if (!user?.client || user.client.toString() !== orderClientId) {
-        return sendError(res, 403, 'Forbidden');
-      }
-    }
-
-    const { pickup_date, pickup_window } = req.body;
-
-    // Push a rescheduled note into status_history (keeps current status)
-    order.status_history.push({
-      status: order.status,
-      changed_by: req.user!.userId,
-      timestamp: new Date(),
-      note: 'Rescheduled',
-    } as any);
-
-    // If the order was already assigned to a route, unassign it
-    if (order.status === 'Assigned') {
-      const Route = require('../models/Routes').default;
-      await Route.updateMany(
-        { orders: order._id, status: { $ne: 'completed' } },
-        { $pull: { orders: order._id } },
-      );
-      order.status = 'Pending';
-      order.deliver_id = undefined as any;
-    }
-
-    order.pickup_date = new Date(pickup_date);
-    order.pickup_window = {
-      start_time: new Date(pickup_window.start_time),
-      end_time: new Date(pickup_window.end_time),
-    };
-    order.updated_at = new Date();
-
-    await order.save();
-
-    // Best-effort re-assign to a route for the new date
-    try {
-      await autoAssignRoute(order);
-    } catch (_) {}
-
-    const updated = await Order.findById(order._id).populate('deliver_id', 'name email phone');
-    return sendSuccess(res, 200, 'Order rescheduled', updated ?? order);
-  } catch (error) {
-    return sendError(res, 400, 'Reschedule failed');
+/**
+ * @swagger
+ * /api/orders/{id}/receive:
+ *   patch:
+ *     summary: Confirmar recepción en planta e inventario (solo staff/admin)
+ *     description: |
+ *       El personal de planta confirma cuántas bolsas recibe físicamente y realiza un
+ *       conteo de ítems según su estado (buen estado, mal estado, manchado).
+ *       Estado → `Arrived`.
+ *     tags: [Orders]
+ *     security:
+ *       - cookieAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [staff_confirmed_bags, items]
+ *             properties:
+ *               staff_confirmed_bags: { type: integer }
+ *               items:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   required: [id, qty_good, qty_bad, qty_stained]
+ *                   properties:
+ *                     id: { type: integer, description: "ID del order_item" }
+ *                     qty_good: { type: integer }
+ *                     qty_bad: { type: integer }
+ *                     qty_stained: { type: integer }
+ *     responses:
+ *       200:
+ *         description: Recepción confirmada
+ *       400:
+ *         description: Error en la recepción
+ *       401:
+ *         description: No autenticado
+ */
+export const receiveOrder = async (req: Request, res: Response) => {
+  try {
+    const userId = Number(req.user!.userId);
+    const orderId = Number(req.params.id);
+    const order = await OrderService.receiveInPlant(orderId, userId, req.body);
+    return sendSuccess(res, 200, "Order received in plant and inventory recorded", order);
+  } catch (error: any) {
+    return sendError(res, 400, error.message || "Reception failed");
   }
 };

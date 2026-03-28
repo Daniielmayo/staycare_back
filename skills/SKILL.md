@@ -42,7 +42,7 @@ Nunca escribas SQL en un controlador. Nunca escribas lógica de negocio en un co
 |-------------|--------------------|-----------------------------|
 | auth        | /api/auth          | users, password_resets      |
 | users       | /api/users         | users                       |
-| clients     | /api/clients       | clients, properties         |
+| clients     | /api/clients       | users (rol client), client_profiles, properties |
 | orders      | /api/orders        | orders, order_items, order_status_history, order_photos |
 | routes      | /api/routes        | routes, route_orders        |
 | facility    | /api/facility      | machines                    |

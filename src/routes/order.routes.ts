@@ -4,22 +4,17 @@ import {
   getAllOrders,
   getOrderById,
   updateOrder,
-  updateOrderStatus,
-  confirmPickup,
-  receiveAtFacility,
-  confirmDelivery,
-  reassignOrder,
+  advanceOrderStatus,
   deleteOrder,
   rescheduleOrder,
+  reassignOrder,
+  receiveOrder,
 } from "../controllers/order.controller";
 import { validate } from "../middleware/validate";
 import {
   createOrderSchema,
   updateOrderSchema,
-  updateStatusSchema,
-  pickupConfirmSchema,
-  facilityReceiveSchema,
-  deliveryConfirmSchema,
+  advanceStatusSchema,
   rescheduleOrderSchema,
 } from "../validation/order.validation";
 import { authenticate } from "../middleware/authenticate";
@@ -29,6 +24,11 @@ const router = Router();
 
 router.use(authenticate);
 
+// ─── List & Detail ────────────────────────────────────────────────────────────
+router.get("/", getAllOrders);
+router.get("/:id", getOrderById);
+
+// ─── Create ───────────────────────────────────────────────────────────────────
 router.post(
   "/",
   authorize("admin", "staff", "client"),
@@ -36,10 +36,7 @@ router.post(
   createOrder,
 );
 
-router.get("/", getAllOrders);
-
-router.get("/:id", getOrderById);
-
+// ─── Update (structural data) ─────────────────────────────────────────────────
 router.put(
   "/:id",
   authorize("admin", "staff"),
@@ -47,40 +44,15 @@ router.put(
   updateOrder,
 );
 
+// ─── Status — single unified PATCH ───────────────────────────────────────────
+// Permisos de rol por status se validan dentro del servicio (OrderService.advanceStatus)
 router.patch(
   "/:id/status",
-  authorize("admin", "staff"),
-  validate(updateStatusSchema),
-  updateOrderStatus,
+  validate(advanceStatusSchema),
+  advanceOrderStatus,
 );
 
-router.patch(
-  "/:id/pickup",
-  authorize("driver", "admin"),
-  validate(pickupConfirmSchema),
-  confirmPickup,
-);
-
-router.patch(
-  "/:id/receive",
-  authorize("staff", "admin"),
-  validate(facilityReceiveSchema),
-  receiveAtFacility,
-);
-
-router.patch(
-  "/:id/deliver",
-  authorize("driver", "admin"),
-  validate(deliveryConfirmSchema),
-  confirmDelivery,
-);
-
-router.patch(
-  "/:id/reassign",
-  authorize("admin", "staff"),
-  reassignOrder,
-);
-
+// ─── Structural operations (no son solo cambio de estado) ────────────────────
 router.patch(
   "/:id/reschedule",
   authorize("admin", "staff", "client"),
@@ -88,6 +60,19 @@ router.patch(
   rescheduleOrder,
 );
 
+router.patch(
+  "/:id/reassign",
+  authorize("admin"),
+  reassignOrder,
+);
+
+router.patch(
+  "/:id/receive",
+  authorize("admin", "staff"),
+  receiveOrder,
+);
+
+// ─── Delete ───────────────────────────────────────────────────────────────────
 router.delete("/:id", authorize("admin"), deleteOrder);
 
 export default router;

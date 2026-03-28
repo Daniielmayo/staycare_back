@@ -2,9 +2,9 @@ import { z } from "zod";
 
 export const createInvoiceSchema = z.object({
   body: z.object({
-    client: z.string().min(1),
-    orders: z.array(z.string().min(1)).min(1),
-    due_date: z.string().datetime({ offset: true }).or(z.string().min(1)),
+    client_id: z.number().int().positive(),
+    order_ids: z.array(z.number().int().positive()).min(1),
+    due_date: z.string().min(1, "due_date is required"),
     line_items: z
       .array(
         z.object({
@@ -30,3 +30,6 @@ export const recordPaymentSchema = z.object({
   }),
   params: z.object({ id: z.string() }),
 });
+
+export type CreateInvoiceInput = z.infer<typeof createInvoiceSchema>["body"];
+export type RecordPaymentInput = z.infer<typeof recordPaymentSchema>["body"];

@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import { AuthService } from "../services/auth.service";
+import { UserService } from "../services/user.service";
 import { UserRepository } from "../repositories/user.repository";
 import { ClientProfileRepository } from "../repositories/clientProfile.repository";
 import { setAuthCookies, clearAuthCookies } from "../utils/auth.helper";
@@ -174,11 +175,16 @@ export const refreshAccessToken = async (req: Request, res: Response) => {
  */
 export const getMe = async (req: Request, res: Response) => {
   try {
-    const user = await UserRepository.findById(req.user!.userId);
-    if (!user) throw new AppError("User not found", 404);
-
+    const { user, client_profile, properties } = await UserService.getUserByIdWithClientProfileIfExists(req.user!.userId);
+    
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { password_hash, refresh_token, ...safeUser } = user;
-    return sendSuccess(res, 200, "Current user", { user: safeUser });
+    
+    return sendSuccess(res, 200, "Current user", { 
+      user: safeUser,
+      client_profile,
+      properties
+    });
   } catch (error: any) {
     if (error instanceof AppError) return sendError(res, error.statusCode, error.message);
     return sendError(res, 400, "Failed to fetch user");
@@ -216,9 +222,19 @@ export const getMe = async (req: Request, res: Response) => {
  */
 export const updateMe = async (req: Request, res: Response) => {
   try {
-    const user = await AuthService.updateMe(Number(req.user!.userId), req.body);
+    const userId = Number(req.user!.userId);
+    await AuthService.updateMe(userId, req.body);
+    
+    const { user, client_profile, properties } = await UserService.getUserByIdWithClientProfileIfExists(userId);
+
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { password_hash, refresh_token, ...safeUser } = user;
-    return sendSuccess(res, 200, "Profile updated", { user: safeUser });
+
+    return sendSuccess(res, 200, "Profile updated", { 
+      user: safeUser,
+      client_profile,
+      properties
+    });
   } catch (error: any) {
     if (error instanceof AppError) return sendError(res, error.statusCode, error.message);
     return sendError(res, 400, "Profile update failed");

@@ -28,6 +28,15 @@ export class PropertyService {
     input: Omit<PropertyInsertInput, "client_profile_id">
   ): Promise<IPropertyRow | null> {
     const cpId = await this.getClientProfileIdForClientUserOrThrow(userId);
+    
+    // Check for duplicates by lat/lng
+    if (input.lat !== undefined && input.lng !== undefined && input.lat !== null && input.lng !== null) {
+      const existing = await PropertyRepository.findByLatLng(cpId, input.lat, input.lng);
+      if (existing) {
+        throw new AppError("Ya existe una sede con estas coordenadas para este cliente", 409);
+      }
+    }
+
     try {
       const row: PropertyInsertInput = {
         client_profile_id: cpId,
@@ -54,6 +63,17 @@ export class PropertyService {
       const cpId = await this.getClientProfileIdForClientUserOrThrow(userId);
       if (prop.client_profile_id !== cpId) {
         throw new AppError("Forbidden", 403);
+      }
+    }
+
+    // Check for duplicates by lat/lng if coordinates are changing
+    const newLat = data.lat !== undefined ? data.lat : prop.lat;
+    const newLng = data.lng !== undefined ? data.lng : prop.lng;
+
+    if (newLat !== null && newLng !== null) {
+      const existing = await PropertyRepository.findByLatLng(prop.client_profile_id, newLat, newLng);
+      if (existing && existing.id !== propertyId) {
+        throw new AppError("Ya existe una sede con estas coordenadas para este cliente", 409);
       }
     }
 

@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { MachineService } from "../services/machine.service";
 import { sendSuccess, sendError } from "../utils/response";
+import { parsePagination, paginationMeta } from "../utils/paginate";
 
 /**
  * @swagger
@@ -18,14 +19,33 @@ import { sendSuccess, sendError } from "../utils/response";
  *     tags: [Machines]
  *     security:
  *       - cookieAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: search
+ *         schema: { type: string }
+ *         description: Buscar por nombre de máquina
+ *       - in: query
+ *         name: type
+ *         schema: { type: string, enum: [washer, dryer, iron] }
+ *       - in: query
+ *         name: status
+ *         schema: { type: string, enum: [available, running, maintenance] }
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 10 }
  *     responses:
  *       200:
- *         description: Lista de máquinas
+ *         description: Lista de máquinas con paginación
  *         content:
  *           application/json:
  *             schema:
  *               type: object
  *               properties:
+ *                 success: { type: boolean }
+ *                 message: { type: string }
  *                 data:
  *                   type: array
  *                   items:
@@ -40,15 +60,34 @@ import { sendSuccess, sendError } from "../utils/response";
  *                       order_number:     { type: string, nullable: true }
  *                       order_status:     { type: string, nullable: true }
  *                       started_at:       { type: string, format: date-time, nullable: true }
+ *                 meta:
+ *                   type: object
+ *                   properties:
+ *                     total: { type: integer }
+ *                     page:  { type: integer }
+ *                     limit: { type: integer }
+ *                     pages: { type: integer }
  *       401:
  *         description: No autenticado
  *       403:
  *         description: Rol sin permiso
  */
-export const getMachineStatus = async (_req: Request, res: Response) => {
+export const getMachineStatus = async (req: Request, res: Response) => {
   try {
-    const machines = await MachineService.getAllMachines();
-    return sendSuccess(res, 200, "Facility machine status", machines);
+    const search = req.query.search as string | undefined;
+    const type = req.query.type as any;
+    const status = req.query.status as any;
+
+    const { page, limit, skip } = parsePagination(req);
+    const { machines, total } = await MachineService.getAllMachines(limit, skip, { search, type, status });
+    
+    return sendSuccess(
+      res, 
+      200, 
+      "Facility machine status", 
+      machines,
+      paginationMeta(total, page, limit)
+    );
   } catch (error) {
     return sendError(res, 500, "Failed to fetch machine status");
   }

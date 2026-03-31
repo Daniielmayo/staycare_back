@@ -33,7 +33,8 @@ export class InvitationRepository {
 
   static async findPendingByEmail(email: string): Promise<IInvitationMySQL[]> {
     const [rows] = await pool.execute<RowDataPacket[]>(
-      `SELECT * FROM invitations WHERE email = ? AND used = 0`,
+      `SELECT * FROM invitations 
+       WHERE email = ? AND used = 0 AND expires_at > NOW()`,
       [email]
     );
     return (rows as any[]).map((r) => ({ ...r, used: Boolean(r.used) }));
@@ -78,15 +79,64 @@ export class InvitationRepository {
     );
   }
 
-  static async findMany(limit = 50): Promise<IInvitationMySQL[]> {
-    const [rows] = await pool.execute<RowDataPacket[]>(
+  static async findMany(
+    limit: number,
+    offset: number,
+    filter: { status?: "pending" | "expired" | "used" | undefined; search?: string | undefined } = {}
+  ): Promise<IInvitationMySQL[]> {
+    let where = "1=1";
+    const params: any[] = [];
+
+    if (filter.search) {
+      where += " AND i.email LIKE ?";
+      params.push(`%${filter.search}%`);
+    }
+
+    if (filter.status === "pending") {
+      where += " AND i.used = 0 AND i.expires_at > NOW()";
+    } else if (filter.status === "expired") {
+      where += " AND i.used = 0 AND i.expires_at <= NOW()";
+    } else if (filter.status === "used") {
+      where += " AND i.used = 1";
+    }
+
+    params.push(limit, offset);
+
+    const [rows] = await pool.query<RowDataPacket[]>(
       `SELECT i.*, u.name AS creator_name, u.email AS creator_email
        FROM invitations i
        LEFT JOIN users u ON i.created_by = u.id
-       ORDER BY i.expires_at DESC
-       LIMIT ?`,
-      [limit]
+       WHERE ${where}
+       ORDER BY i.created_at DESC
+       LIMIT ? OFFSET ?`,
+      params
     );
     return (rows as any[]).map((r) => ({ ...r, used: Boolean(r.used) }));
+  }
+
+  static async countMany(
+    filter: { status?: "pending" | "expired" | "used" | undefined; search?: string | undefined } = {}
+  ): Promise<number> {
+    let where = "1=1";
+    const params: any[] = [];
+
+    if (filter.search) {
+      where += " AND email LIKE ?";
+      params.push(`%${filter.search}%`);
+    }
+
+    if (filter.status === "pending") {
+      where += " AND used = 0 AND expires_at > NOW()";
+    } else if (filter.status === "expired") {
+      where += " AND used = 0 AND expires_at <= NOW()";
+    } else if (filter.status === "used") {
+      where += " AND used = 1";
+    }
+
+    const [rows] = await pool.execute<RowDataPacket[]>(
+      `SELECT COUNT(*) AS total FROM invitations WHERE ${where}`,
+      params
+    );
+    return Number((rows[0] as { total: number }).total) || 0;
   }
 }

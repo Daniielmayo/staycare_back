@@ -95,10 +95,10 @@ export const getUserById = async (req: Request, res: Response) => {
     if (typeof rawId !== "string") {
       return sendError(res, 400, "Invalid user id");
     }
-    const { user, client_profile } = await UserService.getUserByIdWithClientProfileIfExists(rawId);
+    const { user, client_profile, properties } = await UserService.getUserByIdWithClientProfileIfExists(rawId);
     const safe = stripUserSecrets(user);
 
-    return sendSuccess(res, 200, "User retrieved", { user: safe, client_profile });
+    return sendSuccess(res, 200, "User retrieved", { user: safe, client_profile, properties });
   } catch (error: unknown) {
     if (error instanceof AppError) return sendError(res, error.statusCode, error.message);
     console.error("getUserById:", error);
@@ -153,10 +153,10 @@ export const updateUser = async (req: Request, res: Response) => {
       return sendError(res, 400, "Invalid user id");
     }
 
-    const { user, client_profile } = await UserService.updateUserByAdmin(rawId, req.body);
+    const { user, client_profile, properties } = await UserService.updateUserByAdmin(rawId, req.body);
 
     const safe = stripUserSecrets(user);
-    return sendSuccess(res, 200, "User updated", { user: safe, client_profile });
+    return sendSuccess(res, 200, "User updated", { user: safe, client_profile, properties });
   } catch (error: unknown) {
     if (error instanceof AppError) return sendError(res, error.statusCode, error.message);
     console.error("updateUser:", error);

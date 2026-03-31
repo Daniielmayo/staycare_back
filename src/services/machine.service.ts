@@ -1,10 +1,18 @@
 import pool from "../db/pool";
-import { MachineRepository, MachineType } from "../repositories/machine.repository";
+import { MachineRepository, MachineType, MachineStatus } from "../repositories/machine.repository";
 import { OrderRepository } from "../repositories/order.repository";
 
 export class MachineService {
-  static async getAllMachines() {
-    return MachineRepository.findAll();
+  static async getAllMachines(
+    limit: number,
+    offset: number,
+    filter: { search?: string | undefined; type?: MachineType | undefined; status?: MachineStatus | undefined } = {}
+  ) {
+    const [machines, total] = await Promise.all([
+      MachineRepository.findAll(limit, offset, filter),
+      MachineRepository.countAll(filter),
+    ]);
+    return { machines, total };
   }
 
   static async createMachine(data: { name: string; type: MachineType; capacity: number }) {

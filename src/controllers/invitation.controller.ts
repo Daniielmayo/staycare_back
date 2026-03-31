@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import { InvitationService } from "../services/invitation.service";
 import { sendSuccess, sendError } from "../utils/response";
+import { parsePagination, paginationMeta } from "../utils/paginate";
 
 /**
  * @swagger
@@ -231,19 +232,36 @@ export const registerViaInvitation = async (req: Request, res: Response) => {
  * @swagger
  * /api/invitations:
  *   get:
- *     summary: Listar invitaciones (últimas 50)
- *     description: Solo **admin**. Devuelve todas las invitaciones ordenadas por `expires_at` DESC.
+ *     summary: Listar invitaciones con filtros y paginación
+ *     description: Solo **admin**. Permite filtrar por estado (pendiente, expirada, usada) y buscar por email.
  *     tags: [Invitations]
  *     security:
  *       - cookieAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema: { type: string, enum: [pending, expired, used] }
+ *         description: Filtrar por estado de la invitación
+ *       - in: query
+ *         name: search
+ *         schema: { type: string }
+ *         description: Buscar por email
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 10 }
  *     responses:
  *       200:
- *         description: Lista de invitaciones
+ *         description: Lista de invitaciones con paginación
  *         content:
  *           application/json:
  *             schema:
  *               type: object
  *               properties:
+ *                 success: { type: boolean }
+ *                 message: { type: string }
  *                 data:
  *                   type: object
  *                   properties:
@@ -262,15 +280,33 @@ export const registerViaInvitation = async (req: Request, res: Response) => {
  *                           created_at:   { type: string, format: date-time }
  *                           creator_name: { type: string }
  *                           creator_email: { type: string }
+ *                 meta:
+ *                   type: object
+ *                   properties:
+ *                     total: { type: integer }
+ *                     page:  { type: integer }
+ *                     limit: { type: integer }
+ *                     pages: { type: integer }
  *       401:
  *         description: No autenticado
  *       403:
  *         description: No es admin
  */
-export const listInvitations = async (_req: Request, res: Response) => {
+export const listInvitations = async (req: Request, res: Response) => {
   try {
-    const invitations = await InvitationService.listInvitations();
-    return sendSuccess(res, 200, "Invitations list", { invitations });
+    const status = req.query.status as any;
+    const search = req.query.search as string | undefined;
+    const { page, limit, skip } = parsePagination(req);
+
+    const { invitations, total } = await InvitationService.listInvitations(limit, skip, { status, search });
+    
+    return sendSuccess(
+      res, 
+      200, 
+      "Invitations list", 
+      { invitations },
+      paginationMeta(total, page, limit)
+    );
   } catch (error: any) {
     return sendError(res, 400, "Failed to fetch invitations");
   }

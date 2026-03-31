@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 import { UserRepository, type IUserMySQL } from "../repositories/user.repository";
 import { ClientProfileRepository } from "../repositories/clientProfile.repository";
+import { PropertyRepository, type IPropertyRow } from "../repositories/property.repository";
 import { AppError } from "../utils/AppError";
 import { duplicateEntryMessage } from "../utils/mysqlErrors";
 import type { IClientProfileRow } from "../repositories/clientProfile.repository";
@@ -141,18 +142,32 @@ export class UserService {
   }
 
   static async getUserByIdWithClientProfileIfExists(
-    rawId: string
-  ): Promise<{ user: IUserMySQL; client_profile: Awaited<ReturnType<typeof ClientProfileRepository.findByUserId>> }> {
+    rawId: string | number
+  ): Promise<{ 
+    user: IUserMySQL; 
+    client_profile: IClientProfileRow | null; 
+    properties: IPropertyRow[] | null 
+  }> {
     const user = await UserRepository.findById(rawId);
     if (!user) throw new AppError("User not found", 404);
-    const client_profile =
-      user.role === "client" ? await ClientProfileRepository.findByUserId(user.id!) : null;
-    return { user, client_profile };
+
+    let client_profile: IClientProfileRow | null = null;
+    let properties: IPropertyRow[] | null = null;
+
+    if (user.role === "client") {
+      client_profile = await ClientProfileRepository.findByUserId(user.id!);
+      if (client_profile?.id) {
+        properties = await PropertyRepository.listByClientProfileId(client_profile.id);
+      }
+    }
+
+    return { user, client_profile, properties };
   }
 
   static async updateUserByAdmin(rawId: string, body: UpdateUserByAdminBody): Promise<{
     user: IUserMySQL;
-    client_profile: Awaited<ReturnType<typeof ClientProfileRepository.findByUserId>>;
+    client_profile: IClientProfileRow | null;
+    properties: IPropertyRow[] | null;
   }> {
     const { password, client_profile: profileToUpdate, ...rest } = body;
 
@@ -195,9 +210,17 @@ export class UserService {
     const user = await UserRepository.findById(rawId);
     if (!user) throw new AppError("User not found", 404);
 
-    const client_profile =
-      user.role === "client" ? await ClientProfileRepository.findByUserId(user.id!) : null;
-    return { user, client_profile };
+    let client_profile: IClientProfileRow | null = null;
+    let properties: IPropertyRow[] | null = null;
+
+    if (user.role === "client") {
+      client_profile = await ClientProfileRepository.findByUserId(user.id!);
+      if (client_profile?.id) {
+        properties = await PropertyRepository.listByClientProfileId(client_profile.id);
+      }
+    }
+
+    return { user, client_profile, properties };
   }
 
   static async deactivateUser(rawId: string): Promise<IUserMySQL> {

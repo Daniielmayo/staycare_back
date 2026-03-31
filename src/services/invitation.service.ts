@@ -31,6 +31,12 @@ export class InvitationService {
       throw new AppError("El correo electrónico ya está registrado en el sistema", 409);
     }
 
+    // Check for pending and not expired invitations
+    const pendingInvites = await InvitationRepository.findPendingByEmail(email);
+    if (pendingInvites.length > 0) {
+      throw new AppError("Ya existe una invitación pendiente y activa para este correo electrónico", 400);
+    }
+
     const conn = await pool.getConnection();
     try {
       await conn.beginTransaction();
@@ -165,7 +171,15 @@ export class InvitationService {
     }
   }
 
-  static async listInvitations(limit = 50) {
-    return InvitationRepository.findMany(limit);
+  static async listInvitations(
+    limit: number,
+    offset: number,
+    filter: { status?: "pending" | "expired" | "used" | undefined; search?: string | undefined } = {}
+  ) {
+    const [invitations, total] = await Promise.all([
+      InvitationRepository.findMany(limit, offset, filter),
+      InvitationRepository.countMany(filter),
+    ]);
+    return { invitations, total };
   }
 }

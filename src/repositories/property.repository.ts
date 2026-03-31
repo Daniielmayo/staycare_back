@@ -52,6 +52,21 @@ export class PropertyRepository {
     return (rows[0] as IPropertyRow) || null;
   }
 
+  static async findByLatLng(
+    clientProfileId: number,
+    lat: string | number,
+    lng: string | number
+  ): Promise<IPropertyRow | null> {
+    const [rows] = await pool.execute<RowDataPacket[]>(
+      `SELECT id, client_profile_id, property_name, address, city, area,
+              access_notes, lat, lng, created_at, updated_at
+       FROM properties 
+       WHERE client_profile_id = ? AND lat = ? AND lng = ? LIMIT 1`,
+      [clientProfileId, String(lat), String(lng)]
+    );
+    return (rows[0] as IPropertyRow) || null;
+  }
+
   static async insert(conn: PoolConnection | null, row: PropertyInsertInput): Promise<number> {
     const exec = this.executor(conn);
     const [result] = await exec.execute<ResultSetHeader>(

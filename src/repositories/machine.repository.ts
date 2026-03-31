@@ -23,14 +23,39 @@ export interface IMachineMySQL {
 export class MachineRepository {
   // ─── Read ──────────────────────────────────────────────────────────────────
 
-  static async findAll(): Promise<IMachineMySQL[]> {
-    const [rows] = await pool.execute<RowDataPacket[]>(
+  static async findAll(
+    limit: number,
+    offset: number,
+    filter: { search?: string | undefined; type?: MachineType | undefined; status?: MachineStatus | undefined } = {}
+  ): Promise<IMachineMySQL[]> {
+    let where = "1=1";
+    const params: any[] = [];
+
+    if (filter.search) {
+      where += " AND m.name LIKE ?";
+      params.push(`%${filter.search}%`);
+    }
+    if (filter.type) {
+      where += " AND m.type = ?";
+      params.push(filter.type);
+    }
+    if (filter.status) {
+      where += " AND m.status = ?";
+      params.push(filter.status);
+    }
+
+    params.push(limit, offset);
+
+    const [rows] = await pool.query<RowDataPacket[]>(
       `SELECT m.*,
               o.order_number,
               o.status AS order_status
        FROM machines m
        LEFT JOIN orders o ON m.current_order_id = o.id
-       ORDER BY m.type ASC, m.name ASC`
+       WHERE ${where}
+       ORDER BY m.type ASC, m.name ASC
+       LIMIT ? OFFSET ?`,
+      params
     );
     return rows as IMachineMySQL[];
   }
@@ -48,9 +73,28 @@ export class MachineRepository {
     return (rows[0] as IMachineMySQL) || null;
   }
 
-  static async countAll(): Promise<number> {
+  static async countAll(
+    filter: { search?: string | undefined; type?: MachineType | undefined; status?: MachineStatus | undefined } = {}
+  ): Promise<number> {
+    let where = "1=1";
+    const params: any[] = [];
+
+    if (filter.search) {
+      where += " AND name LIKE ?";
+      params.push(`%${filter.search}%`);
+    }
+    if (filter.type) {
+      where += " AND type = ?";
+      params.push(filter.type);
+    }
+    if (filter.status) {
+      where += " AND status = ?";
+      params.push(filter.status);
+    }
+
     const [rows] = await pool.execute<RowDataPacket[]>(
-      `SELECT COUNT(*) AS total FROM machines`
+      `SELECT COUNT(*) AS total FROM machines WHERE ${where}`,
+      params
     );
     return Number((rows[0] as { total: number }).total) || 0;
   }

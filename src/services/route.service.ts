@@ -13,7 +13,7 @@ interface RouteCreateInput {
 }
 
 export class RouteService {
-  static async createRoute(data: RouteCreateInput) {
+  static async createRoute(data: RouteCreateInput, userId: number) {
     const conn = await pool.getConnection();
     try {
       await conn.beginTransaction();
@@ -32,7 +32,17 @@ export class RouteService {
           await OrderRepository.update(orderId!, { 
             status: OrderStatus.ASSIGNED, 
             driver_id: data.driver_id 
+          }, conn);
+
+          // Record history
+          await OrderRepository.insertHistory(conn, {
+            order_id: orderId!,
+            changed_by_user_id: userId,
+            is_system: false,
+            status: OrderStatus.ASSIGNED,
+            note: `Assigned to route on ${data.route_date}`
           });
+
           // Assign to route_orders
           await RouteRepository.assignOrder(conn, routeId, orderId!, i + 1);
         }

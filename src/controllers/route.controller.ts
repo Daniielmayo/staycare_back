@@ -37,7 +37,8 @@ import { AppError } from "../utils/AppError";
  */
 export const createRoute = async (req: Request, res: Response) => {
   try {
-    const route = await RouteService.createRoute(req.body);
+    const userId = Number(req.user!.userId);
+    const route = await RouteService.createRoute(req.body, userId);
     return sendSuccess(res, 201, "Route created", route);
   } catch (error) {
     return sendError(res, 400, "Route creation failed");

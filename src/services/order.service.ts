@@ -1,6 +1,7 @@
 import pool from "../db/pool";
 import { OrderRepository, IOrderMySQL } from "../repositories/order.repository";
 import { ClientProfileRepository } from "../repositories/clientProfile.repository";
+import { ItemRepository } from "../repositories/item.repository";
 import { OrderStatus } from "../types/orderStatus";
 import { sendOrderStatusEmail } from "../utils/mail";
 import { PoolConnection } from "mysql2/promise";
@@ -69,9 +70,48 @@ export class OrderService {
           throw new Error("Your account has no linked client profile.");
         }
         clientId = profile.id;
+      } else {
+        if (!clientId) {
+          throw new Error("A client_id is required to create an order as admin/staff.");
+        }
+        // Verify client exists
+        const client = await ClientProfileRepository.findById(clientId);
+        if (!client) {
+          throw new Error(`Client with ID ${clientId} not found.`);
+        }
       }
 
       const orderNumber = this.generateOrderNumber();
+      
+      // Calculate pricing based on items
+      let subtotal = 0;
+      const vatPercentage = 18;
+      const calculatedItems: any[] = [];
+
+      if (data.items && Array.isArray(data.items)) {
+        for (const item of data.items) {
+          const itemDef = await ItemRepository.findById(item.item_id);
+          if (!itemDef) {
+            throw new Error(`Item with ID ${item.item_id} not found.`);
+          }
+          const unitPrice = itemDef.base_price;
+          const totalPrice = unitPrice * item.quantity;
+          subtotal += totalPrice;
+          
+          calculatedItems.push({
+            item_id: item.item_id,
+            item_code: itemDef.item_code,
+            name: itemDef.name,
+            quantity: item.quantity,
+            unit_price: unitPrice,
+            total_price: totalPrice
+          });
+        }
+      }
+
+      const vatAmount = parseFloat((subtotal * (vatPercentage / 100)).toFixed(2));
+      const total = parseFloat((subtotal + vatAmount).toFixed(2));
+
       const orderData: Omit<IOrderMySQL, "id" | "created_at" | "updated_at"> = {
         order_number: orderNumber,
         client_id: clientId,
@@ -86,29 +126,27 @@ export class OrderService {
         staff_confirmed_bags: null,
         special_notes: data.special_notes || null,
         status: OrderStatus.PENDING,
-        subtotal: data.pricing_snapshot?.subtotal || 0,
-        vat_percentage: data.pricing_snapshot?.vat_percentage || 18,
-        vat_amount: data.pricing_snapshot?.vat_amount || 0,
-        total: data.pricing_snapshot?.total || 0,
+        subtotal,
+        vat_percentage: vatPercentage,
+        vat_amount: vatAmount,
+        total,
       };
 
       const orderId = await OrderRepository.insert(conn, orderData);
 
-      if (data.items && Array.isArray(data.items)) {
-        for (const item of data.items) {
-          await OrderRepository.insertItem(conn, {
-            order_id: orderId,
-            item_id: item.item_id || null,
-            item_code_snapshot: item.item_code,
-            name_snapshot: item.name,
-            quantity: item.quantity || 1,
-            unit_price: item.unit_price || 0,
-            total_price: item.total_price || 0,
-            qty_good: 0,
-            qty_bad: 0,
-            qty_stained: 0,
-          });
-        }
+      for (const item of calculatedItems) {
+        await OrderRepository.insertItem(conn, {
+          order_id: orderId,
+          item_id: item.item_id,
+          item_code_snapshot: item.item_code,
+          name_snapshot: item.name,
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+          total_price: item.total_price,
+          qty_good: 0,
+          qty_bad: 0,
+          qty_stained: 0,
+        });
       }
 
       await OrderRepository.insertHistory(conn, {

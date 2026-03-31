@@ -2,12 +2,13 @@ import { z } from "zod";
 import { OrderStatus } from "../types/orderStatus";
 
 const orderItemSchema = z.object({
-  item_id: z.number().int().optional(),
-  item_code: z.string().min(1),
-  name: z.string().min(1),
+  item_id: z.number().int(),
   quantity: z.number().int().positive(),
-  unit_price: z.number().positive(),
-  total_price: z.number().positive(),
+  // Optional snapshots if sent, but will be overwritten by backend
+  item_code: z.string().optional(),
+  name: z.string().optional(),
+  unit_price: z.number().optional(),
+  total_price: z.number().optional(),
 });
 
 export const createOrderSchema = z.object({
@@ -22,15 +23,7 @@ export const createOrderSchema = z.object({
     }),
     estimated_bags: z.number().int().positive().optional(),
     special_notes: z.string().optional(),
-    items: z.array(orderItemSchema).optional(),
-    pricing_snapshot: z
-      .object({
-        subtotal: z.number(),
-        vat_percentage: z.number(),
-        vat_amount: z.number(),
-        total: z.number(),
-      })
-      .optional(),
+    items: z.array(orderItemSchema).min(1), // Require at least one item
   }),
 });
 
@@ -57,14 +50,6 @@ export const updateOrderSchema = z.object({
     estimated_bags: z.number().int().positive().optional(),
     special_notes: z.string().optional(),
     items: z.array(orderItemSchema).optional(),
-    pricing_snapshot: z
-      .object({
-        subtotal: z.number(),
-        vat_percentage: z.number(),
-        vat_amount: z.number(),
-        total: z.number(),
-      })
-      .optional(),
   }),
   params: z.object({ id: z.string() }),
 });

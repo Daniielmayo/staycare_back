@@ -57,20 +57,10 @@ import { parsePagination, paginationMeta } from "../utils/paginate";
  *                 type: array
  *                 items:
  *                   type: object
+ *                   required: [item_id, quantity]
  *                   properties:
- *                     item_id:     { type: integer, nullable: true }
- *                     item_code:   { type: string }
- *                     name:        { type: string }
+ *                     item_id:     { type: integer }
  *                     quantity:    { type: integer }
- *                     unit_price:  { type: number }
- *                     total_price: { type: number }
- *               pricing_snapshot:
- *                 type: object
- *                 properties:
- *                   subtotal:       { type: number }
- *                   vat_percentage: { type: number }
- *                   vat_amount:     { type: number }
- *                   total:          { type: number }
  *     responses:
  *       201:
  *         description: Pedido creado con estado PENDING

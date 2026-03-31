@@ -251,10 +251,10 @@ CREATE TABLE IF NOT EXISTS `staycare`.`orders` (
   INDEX `idx_orders_status` (`status` ASC) VISIBLE,
   INDEX `idx_orders_pickup_date` (`pickup_date` ASC) VISIBLE,
   INDEX `idx_orders_status_date` (`status` ASC, `pickup_date` ASC) VISIBLE,
-  CONSTRAINT `fk_orders_client`
+  CONSTRAINT `fk_orders_client_user`
     FOREIGN KEY (`client_id`)
-    REFERENCES `staycare`.`client_profiles` (`id`)
-    ON DELETE RESTRICT
+    REFERENCES `staycare`.`users` (`id`)
+    ON DELETE CASCADE
     ON UPDATE CASCADE,
   CONSTRAINT `fk_orders_driver`
     FOREIGN KEY (`driver_id`)

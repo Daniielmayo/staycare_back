@@ -67,10 +67,40 @@ export class RouteRepository {
       params
     );
 
+    const total = totalRows[0] ? Number(totalRows[0].total) : 0;
+    const finalRoutes = routes as any[];
+
+    if (finalRoutes.length > 0) {
+      const routeIds = finalRoutes.map((r) => r.id);
+      const [allOrders] = await pool.query<RowDataPacket[]>(
+        `SELECT ro.route_id, ro.order_id, ro.position, o.order_number, o.status,
+                u.name as client_company, cp.contact_person as client_contact, u.phone as client_phone
+         FROM route_orders ro
+         JOIN orders o ON ro.order_id = o.id
+         JOIN users u ON o.client_id = u.id
+         LEFT JOIN client_profiles cp ON u.id = cp.user_id
+         WHERE ro.route_id IN (?)
+         ORDER BY ro.route_id, ro.position ASC`,
+        [routeIds]
+      );
+
+      // Map orders to their routes
+      const ordersByRouteId: Record<number, any[]> = {};
+      (allOrders as any[]).forEach((ord: any) => {
+        if (!ordersByRouteId[ord.route_id]) {
+          ordersByRouteId[ord.route_id] = [];
+        }
+        ordersByRouteId[ord.route_id]!.push(ord);
+      });
+
+      finalRoutes.forEach((r) => {
+        r.orders = ordersByRouteId[r.id] || [];
+      });
+    }
 
     return {
-      routes: routes as any[],
-      total: Number(totalRows[0]?.total) || 0,
+      routes: finalRoutes,
+      total,
     };
   }
 

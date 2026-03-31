@@ -19,10 +19,10 @@ router.use(authenticate);
 
 // Add property (Self: client role, or Admin for others)
 router.post("/", validate(createPropertySchema), addProperty);
-router.post("/user/:userId", authorize("admin"), validate(createPropertySchema), addProperty);
+router.post("/user/:userId", authorize("admin", "client"), validate(createPropertySchema), addProperty);
 
 // Get properties of a specific user (Admin only)
-router.get("/user/:userId", authorize("admin", "client"), getUserProperties);
+router.get("/user/:userId", authorize("admin", "client", "staff"), getUserProperties);
 
 // Update/Delete property (Self if owner, or Admin)
 router.put("/:id", validate(updatePropertySchema), updateProperty);

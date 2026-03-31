@@ -14,8 +14,8 @@ import { AppError } from "../utils/AppError";
  * @swagger
  * /api/properties/user/{userId}:
  *   get:
- *     summary: Obtener sedes de un usuario (Admin o Dueño)
- *     description: Si userId es "me", devuelve las sedes del usuario autenticado. Los clientes solo pueden ver sus propias sedes.
+ *     summary: Obtener sedes de un usuario (Admin, Staff o Dueño)
+ *     description: Si userId es "me", devuelve las sedes del usuario autenticado. Los clientes solo pueden ver sus propias sedes. Los administradores y trabajadores (Staff) pueden ver las sedes de cualquier usuario.
  *     tags: [Properties]
  *     security:
  *       - cookieAuth: []
@@ -40,8 +40,8 @@ export const getUserProperties = async (req: Request, res: Response) => {
       userId = Number(rawId);
       if (isNaN(userId)) return sendError(res, 400, "Invalid user id");
       
-      // Permission check: if not admin, can only see their own properties
-      if (req.user!.role !== "admin" && userId !== Number(req.user!.userId)) {
+      // Permission check: if not admin or staff, can only see their own properties
+      if (req.user!.role !== "admin" && req.user!.role !== "staff" && userId !== Number(req.user!.userId)) {
         return sendError(res, 403, "Forbidden: You can only view your own properties");
       }
     }

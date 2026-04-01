@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS `staycare`.`users` (
   `email` VARCHAR(150) NOT NULL,
   `password_hash` VARCHAR(255) NOT NULL,
   `phone` VARCHAR(30) NULL DEFAULT NULL,
-  `language` ENUM('en', 'es') NOT NULL DEFAULT 'es',
+  `language` ENUM('en', 'es') NOT NULL DEFAULT 'en',
   `role_id` INT UNSIGNED NOT NULL,
   `is_active` TINYINT(1) NOT NULL DEFAULT '1',
   `refresh_token` VARCHAR(512) NULL DEFAULT NULL,

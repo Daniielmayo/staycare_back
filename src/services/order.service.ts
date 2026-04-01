@@ -5,6 +5,7 @@ import { ItemRepository } from "../repositories/item.repository";
 import { OrderStatus } from "../types/orderStatus";
 import { sendOrderStatusEmail } from "../utils/mail";
 import { PoolConnection } from "mysql2/promise";
+import { AppError } from "../utils/AppError";
 
 export class OrderService {
   private static async notifyClientOfStatus(orderId: number, newStatus: OrderStatus): Promise<void> {
@@ -367,6 +368,29 @@ export class OrderService {
     } finally {
       conn.release();
     }
+  }
+
+  static async confirmDriverAction(orderId: number, userId: number, role: string, data: any) {
+    const order = await OrderRepository.findById(orderId);
+    if (!order) throw new AppError("Order not found", 404);
+
+    // Permission check: if not admin, must be the assigned driver
+    if (role === "driver" && order.driver_id !== userId) {
+      throw new AppError("Forbidden: You are not the assigned driver for this order.", 403);
+    }
+
+    // Determine action based on current status
+    if (order.status === OrderStatus.ASSIGNED) {
+      // Driver is starting to collect (pickup)
+      return this.confirmPickup(orderId, data, userId, role);
+    } 
+    
+    if (order.status === OrderStatus.READY_TO_DELIVERY || order.status === OrderStatus.COLLECTED) {
+      // Driver is delivering to client
+      return this.confirmDelivery(orderId, data, userId, role);
+    }
+
+    throw new AppError(`Current order status (${order.status}) does not allow driver confirmation action.`, 400);
   }
 
   static async confirmDelivery(orderId: number, data: any, userId: number, role: string) {

@@ -22,6 +22,7 @@ RUN npm install --omit=dev
 
 # Copy built files from previous stage
 COPY --from=build /app/dist ./dist
+COPY --from=build /app/docs/migration ./docs/migration
 
 # Create a non-root user for security (optional but recommended)
 # RUN addgroup -S staycare && adduser -S staycare -G staycare

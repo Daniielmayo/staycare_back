@@ -508,9 +508,10 @@ export const reassignOrder = async (req: Request, res: Response) => {
  *                 type: array
  *                 items:
  *                   type: object
- *                   required: [id, qty_good, qty_bad, qty_stained]
+ *                   required: [item_id, quantity, qty_good, qty_bad, qty_stained]
  *                   properties:
- *                     id: { type: integer, description: "ID del order_item" }
+ *                     item_id: { type: integer, description: "ID del catálogo de artículos" }
+ *                     quantity: { type: integer, description: "Cantidad total recibida" }
  *                     qty_good: { type: integer }
  *                     qty_bad: { type: integer }
  *                     qty_stained: { type: integer }
@@ -579,7 +580,7 @@ export const confirmDelivery = async (req: Request, res: Response) => {
 
     const userId = Number(req.user!.userId);
     const order = await OrderService.confirmDriverAction(orderId, userId, req.user!.role, req.body);
-    
+
     return sendSuccess(res, 200, "Driver action confirmed", order);
   } catch (error: any) {
     if (error instanceof AppError) return sendError(res, error.statusCode, error.message);

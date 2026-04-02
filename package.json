@@ -1,9 +1,12 @@
 {
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
+    "db:create:dev": "NODE_ENV=development node scripts/dev-db.js create",
+    "db:schema:dev": "NODE_ENV=development node scripts/dev-db.js schema",
+    "db:seed:dev": "NODE_ENV=development node scripts/dev-db.js seed",
+    "db:bootstrap:dev": "NODE_ENV=development node scripts/dev-db.js bootstrap",
     "build": "tsc",
-    "start": "node dist/server.js",
-    "vercel-build": "tsc"
+    "start": "node dist/server.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

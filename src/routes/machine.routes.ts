@@ -24,8 +24,8 @@ router.use(authenticate);
 
 router.get("/", authorize("admin", "staff"), getMachineStatus);
 router.post("/", authorize("admin"), createMachine);
-router.put("/:id", authorize("admin"), updateMachine);
-router.delete("/:id", authorize("admin"), deleteMachine);
+router.put("/:id", authorize("admin", "staff"), updateMachine);
+router.delete("/:id", authorize("admin", "staff"), deleteMachine);
 router.post("/:id/assign", authorize("admin", "staff"), assignMachine);
 router.post("/:id/release", authorize("admin", "staff"), releaseMachine);
 router.post("/seed", authorize("admin", "staff"), seedMachines);

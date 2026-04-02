@@ -21,8 +21,29 @@ function extractSchemaOnly(sql: string): string {
   return idx >= 0 ? sql.slice(0, idx) : sql;
 }
 
+async function resolveSchemaPath(): Promise<string> {
+  const candidates = [
+    path.resolve(process.cwd(), "docs/migration/staycare_mysql.sql"),
+    path.resolve(__dirname, "../../docs/migration/staycare_mysql.sql"),
+    path.resolve(__dirname, "../../../docs/migration/staycare_mysql.sql"),
+  ];
+
+  for (const p of candidates) {
+    try {
+      await fs.access(p);
+      return p;
+    } catch {
+      // keep searching candidate paths
+    }
+  }
+
+  throw new Error(
+    `Schema SQL not found. Checked: ${candidates.join(", ")}`,
+  );
+}
+
 export async function autoInitDbForDevelopment(): Promise<void> {
-  const isDevelopment = String(config.app.env).toLowerCase() === "development";
+  const isDevelopment = String(process.env.NODE_ENV || "").toLowerCase() === "development";
   const enabled = String(process.env.DEV_DB_AUTO_INIT ?? "true").toLowerCase() !== "false";
   if (!isDevelopment || !enabled) return;
 
@@ -39,7 +60,7 @@ export async function autoInitDbForDevelopment(): Promise<void> {
       `CREATE DATABASE IF NOT EXISTS ${quoteIdentifier(config.db.database)} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
     );
 
-    const schemaPath = path.resolve(process.cwd(), "docs/migration/staycare_mysql.sql");
+    const schemaPath = await resolveSchemaPath();
     const rawSchema = await fs.readFile(schemaPath, "utf8");
     const schemaOnly = extractSchemaOnly(rawSchema);
     const normalizedSchema = normalizeSchemaSql(schemaOnly, config.db.database);
